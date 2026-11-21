@@ -26,6 +26,7 @@ beforeEach(() => {
   win.__TAURI_INTERNALS__ = { invoke };
   (win as unknown as { WebSocket: unknown }).WebSocket = FakeSocket;
   delete (win as Partial<Win>).nostr;
+  document.body.innerHTML = "";
   new Function(shimScript())();
 });
 
@@ -69,5 +70,33 @@ describe("shim", () => {
       ["nostr_observe", { kinds: [64, 0] }],
       ["nostr_observe", { kinds: [30762] }],
     ]);
+  });
+
+  const keyFields = () => invoke.mock.calls.filter(([cmd]) => cmd === "nostr_key_field");
+  const settle = () => new Promise((r) => setTimeout(r));
+
+  it.each([
+    ['<input placeholder="nsec1...">'],
+    ['<input name="privateKey">'],
+    ['<input aria-label="Secret key">'],
+    ['<label for="k">Your private key</label><input id="k" type="password">'],
+    [`<textarea placeholder="${"0f".repeat(32)}"></textarea>`],
+  ])("reports a key-shaped field once, without its contents: %s", async (html) => {
+    document.body.innerHTML = `<div>${html}</div><input placeholder="nsec">`;
+    await settle();
+    expect(keyFields()).toEqual([["nostr_key_field", {}]]);
+  });
+
+  it("ignores ordinary fields and never reads a value", async () => {
+    const input = document.createElement("input");
+    input.placeholder = "Your name";
+    Object.defineProperty(input, "value", {
+      get: () => {
+        throw new Error("read the value");
+      },
+    });
+    document.body.replaceChildren(input);
+    await settle();
+    expect(keyFields()).toEqual([]);
   });
 });

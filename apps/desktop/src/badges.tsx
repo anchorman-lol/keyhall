@@ -1,7 +1,9 @@
 import type { Depth } from "@keyhall/core/depth";
+import type { Verdict } from "@keyhall/core/labels";
+import { curatorName, type LauncherContext } from "@keyhall/core/launcher";
 import type { SignIn } from "@keyhall/core/listing";
 import { Badge } from "@keyhall/ui/components/badge";
-import { CheckIcon } from "@phosphor-icons/react";
+import { CheckIcon, SealCheckIcon, WarningIcon } from "@phosphor-icons/react";
 
 type Tone = "success" | "warning" | "destructive" | "info" | "secondary";
 
@@ -46,16 +48,47 @@ export const DEPTH: Record<Depth, { label: string; text: string }> = {
   none: { label: "No Nostr", text: "Relays at most carry signalling for a lobby." },
 };
 
-export function SignInBadge({ signIn }: { signIn: SignIn }) {
-  return <Badge variant={SIGN_IN[signIn].tone}>{SIGN_IN[signIn].label}</Badge>;
+function Marks({ verdict, by }: { verdict: Verdict<unknown>; by: string }) {
+  return (
+    <>
+      {verdict.seen && <CheckIcon data-icon="inline-end" weight="bold" />}
+      {by && (
+        <SealCheckIcon data-icon="inline-end" weight="fill" aria-label={`verified by ${by}`} />
+      )}
+      {verdict.conflicts.length > 0 && (
+        <WarningIcon data-icon="inline-end" weight="fill" aria-label="sources disagree" />
+      )}
+    </>
+  );
 }
 
-export function DepthBadge({ depth, verified }: { depth: Depth | undefined; verified: boolean }) {
-  if (!depth) return null;
+const title = (verdict: Verdict<unknown>, by: string, fallback: string) =>
+  [
+    verdict.seen ? "Seen in the game window" : by ? `Verified by ${by}` : fallback,
+    verdict.conflicts.length > 0 && "Sources disagree",
+  ]
+    .filter(Boolean)
+    .join(". ");
+
+export function SignInBadge({ verdict, by }: { verdict: Verdict<SignIn>; by: string }) {
+  const signIn = verdict.value ?? "unknown";
   return (
-    <Badge variant="depth" title={verified ? "Seen in the game window" : "Declared by the listing"}>
-      {DEPTH[depth].label}
-      {verified && <CheckIcon data-icon="inline-end" weight="bold" />}
+    <Badge variant={SIGN_IN[signIn].tone} title={title(verdict, by, "Declared by the listing")}>
+      {SIGN_IN[signIn].label}
+      <Marks verdict={verdict} by={by} />
     </Badge>
   );
 }
+
+export function DepthBadge({ verdict, by }: { verdict: Verdict<Depth>; by: string }) {
+  if (!verdict.value) return null;
+  return (
+    <Badge variant="depth" title={title(verdict, by, "Declared by the listing")}>
+      {DEPTH[verdict.value].label}
+      <Marks verdict={verdict} by={by} />
+    </Badge>
+  );
+}
+
+export const verifiers = (context: LauncherContext, verdict: Verdict<unknown>) =>
+  verdict.verifiedBy.map((p) => curatorName(context, p)).join(", ");

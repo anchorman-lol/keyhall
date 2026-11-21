@@ -10,7 +10,10 @@ Early work in progress: this is v0, desktop (macOS) first.
 
 - Lists games from the sources you switch on in the sidebar. “Keyhall picks”, the official list (NIP-51 app curation set, kind 30267, `d=games-default` under the project's key), is on by default. Add a curator by npub (all their lists tagged `t=games`) or one list by naddr. “Unvetted listings”, off by default, adds every NIP-89 handler event (kind 31990) tagged `t=game` or `t=games`. Each game shows which sources list it, and your sources are kept in local storage.
 - Shows a sign-in badge from the listing's `auth` tags (worst case wins), a Nostr depth badge (`multiplayer`, `identity` or `none`) and when the game was last updated.
+- Reads NIP-32 labels (kind 1985) from the curators of your enabled sources. A curator's label wins over the listing's tags and the badge gets a “verified by” seal; where the listing, curators and the game window disagree, the game page says who says what.
 - Opens each web game in its own window with an injected `window.nostr` (`getPublicKey`, `signEvent`). Rust answers both. The first time a game asks to sign an event kind, the launcher window asks you to allow it; game windows can't answer that prompt.
+- Warns in the launcher when a game window shows an input that looks like it wants a key (an `nsec` or 64-hex placeholder, or a name, id or label such as “private key”). The check reads only those attributes, never what's typed.
+- If your key curates one of your sources, “Label this game” signs a label with it and publishes only when you confirm.
 - Keeps your key in the macOS keychain. Create one or import an nsec; it stays in the Rust process.
 - Friends are your NIP-02 follow list (read only). The sidebar shows what they're playing, and game cards show which friends are in that game.
 - Presence: while a game window is open, Keyhall publishes a NIP-38 status (`30315`, `d=game`, “Playing Nochess”, expiring after 3 hours) when the window opens and clears it when it closes. Set Public, Friends only (the default) or Hidden for all games, and override it per game.
@@ -30,7 +33,15 @@ Keyhall makes a circle key and sends its secret once to each follow as a NIP-59 
 ["zap", "<pubkey>", "<relay>", "<weight>"] // NIP-57 zap split; without it, "lud16" in the content
 ```
 
-The depth badge starts as the listing declares it. Once you've played, the game window's record of which kinds the game publishes and subscribes to decides it, shown with a ✓. "Last updated" is the newest of the listing's `created_at`, the repo's last push (its NIP-34 state event, or GitHub) and its latest GitHub release.
+Curator labels point at the listing with an `a` tag:
+
+```json
+["L", "game.auth"],  ["l", "nip07", "game.auth"]   // one l per sign-in method
+["L", "game.depth"], ["l", "identity", "game.depth"]
+["a", "31990:<pubkey>:<d>"]
+```
+
+The depth badge starts as the listing declares it, or as the first enabled curator labels it. Once you've played, the game window's record of which kinds the game publishes and subscribes to decides it, shown with a ✓. "Last updated" is the newest of the listing's `created_at`, the repo's last push (its NIP-34 state event, or GitHub) and its latest GitHub release.
 
 ### Isolation
 
@@ -41,7 +52,7 @@ Each game window gets a capability added at runtime, scoped to that window and t
 A pnpm workspace:
 
 - `apps/desktop`: the Tauri 2 app, a React UI and the Rust host (`src-tauri`: keychain, signer, game windows, play-time meter, NWC wallet).
-- `packages/core`: listing and curator-list parsing (`curation.ts`), source settings and their union (`sources.ts`), badges, depth classification, the `window.nostr` shim, relay queries, presence, the budget split, zaps and the launcher's XState machine (key setup, library, game windows, signing approvals, friends, presence, budget payments).
+- `packages/core`: listing and curator-list parsing (`curation.ts`), curator labels and badge verdicts (`labels.ts`), source settings and their union (`sources.ts`), badges, depth classification, the `window.nostr` shim, relay queries, presence, the budget split, zaps and the launcher's XState machine (key setup, library, game windows, signing approvals, friends, presence, budget payments).
 - `packages/ui`: shadcn components (Base UI, Phosphor icons) and the Tailwind theme.
 
 ```sh
@@ -58,7 +69,6 @@ Unsigned builds change their code signature on every rebuild, so macOS asks for 
 ## Next steps
 
 - Publish Keyhall picks under the project's key (`PICKS_PUBKEY` in `packages/core/src/curation.ts` is a placeholder until then), sync sources as encrypted NIP-78 app data, and show games a list holds only as `r` URLs.
-- Curator verification: NIP-32 labels for sign-in and depth, and flagging key-shaped input fields in game windows.
 - A private friends list (NIP-51 follow set) as an alternative to all follows, and keeping the circle key in the keychain instead of local storage.
 - Monthly budget: rolling small shares over to the next month, excluding games, credit-me-publicly zaps and syncing play time between devices.
 - `nip44` in the shim, per-kind scopes from the listing's `k` tags, guest keys per game.

@@ -32,6 +32,13 @@ pub fn sign(keys: &Keys, req: &EventRequest) -> Result<Event, String> {
     unsigned.finalize(keys).map_err(|e| e.to_string())
 }
 
+pub fn label(keys: &Keys, req: &EventRequest) -> Result<Event, String> {
+    if req.kind != 1985 {
+        return Err("Only labels can be signed here".into());
+    }
+    sign(keys, req)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +94,16 @@ mod tests {
         assert!(request(r#"{"content":"","tags":[],"created_at":1}"#).is_err());
         assert!(request(r#"{"kind":1,"content":"","tags":"x","created_at":1}"#).is_err());
         assert!(request(r#"{"kind":-1,"content":"","tags":[],"created_at":1}"#).is_err());
+    }
+
+    #[test]
+    fn signs_only_labels_for_the_launcher() {
+        let keys = Keys::generate();
+        let label =
+            request(r#"{"kind":1985,"content":"","tags":[["a","31990:x:y"]],"created_at":1}"#)
+                .unwrap();
+        assert!(super::label(&keys, &label).unwrap().verify().is_ok());
+        let note = request(r#"{"kind":1,"content":"","tags":[],"created_at":1}"#).unwrap();
+        assert!(super::label(&keys, &note).is_err());
     }
 }

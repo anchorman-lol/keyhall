@@ -26,10 +26,11 @@ use signer::EventRequest;
 const KEYCHAIN_SERVICE: &str = "lol.anchorman.keyhall";
 const KEYCHAIN_ACCOUNT: &str = "nsec";
 const WALLET_ACCOUNT: &str = "nwc";
-const GAME_PERMISSIONS: [&str; 3] = [
+const GAME_PERMISSIONS: [&str; 4] = [
     "allow-nostr-get-public-key",
     "allow-nostr-sign-event",
     "allow-nostr-observe",
+    "allow-nostr-key-field",
 ];
 
 #[derive(Clone)]
@@ -350,6 +351,26 @@ fn nostr_observe(
     .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn nostr_key_field(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<Launcher>,
+) -> Result<(), String> {
+    let game = state.game(&window)?;
+    let main = app
+        .get_webview_window("main")
+        .ok_or("The launcher window is closed")?;
+    let _ = main.set_focus();
+    main.emit("key-field", game.coordinate)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn sign_label(app: AppHandle, event: EventRequest) -> Result<Event, String> {
+    signer::label(&keychain_task(app, Launcher::keys).await?, &event)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(Launcher::default())
@@ -386,7 +407,9 @@ pub fn run() {
             play_sessions,
             nostr_get_public_key,
             nostr_sign_event,
-            nostr_observe
+            nostr_observe,
+            nostr_key_field,
+            sign_label
         ])
         .run(tauri::generate_context!())
         .expect("error while running Keyhall");

@@ -5,6 +5,7 @@ import { FriendsPanel } from "./Friends.tsx";
 import { PresenceSettings } from "./PresenceSettings.tsx";
 import { GamePage } from "./GamePage.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
+import { KeyWarning } from "./KeyWarning.tsx";
 import { findGame, library, playing, type ShimCall } from "@keyhall/core/launcher";
 import { Launcher } from "./launcher.ts";
 import { Library } from "./Library.tsx";
@@ -91,6 +92,7 @@ export function App() {
         </section>
       </main>
       <SignRequest />
+      <KeyWarning />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { launcherMachine, type ShimCall, type SignRequest } from "@keyhall/core/
 import {
   fetchFriends,
   fetchGames,
+  fetchLabels,
   fetchLastUpdated,
   fetchListings,
   fetchLists,
@@ -30,6 +31,9 @@ const machine = launcherMachine(
     fetchListings,
     fetchGames,
     fetchLastUpdated,
+    fetchLabels,
+    signLabel: (event) => invoke("sign_label", { event }),
+    publish,
     openGame: (game) =>
       invoke("open_game", {
         name: game.name,
@@ -51,6 +55,9 @@ const machine = launcherMachine(
         listen<SignRequest>("sign-request", ({ payload }) =>
           send({ type: "sign-request", request: payload }),
         ),
+        listen<string>("key-field", ({ payload }) =>
+          send({ type: "key-field", coordinate: payload }),
+        ),
       ];
       return () => subscriptions.forEach((s) => s.then((unlisten) => unlisten()));
     },
@@ -58,7 +65,6 @@ const machine = launcherMachine(
     saveSources: (sources) => localStorage.setItem("sources", JSON.stringify(sources)),
     fetchFriends,
     subscribe,
-    publish,
     signEvent: (event) => invoke("sign_event", { event }),
     nip44Encrypt: (pubkey, text) => invoke("nip44_encrypt", { pubkey, text }),
     nip44Decrypt: (pubkey, text) => invoke("nip44_decrypt", { pubkey, text }),

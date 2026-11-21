@@ -1,11 +1,20 @@
-import { depthOf, observedKinds, updatedAt } from "@keyhall/core/launcher";
+import type { Claim, Verdict } from "@keyhall/core/labels";
+import {
+  curatorName,
+  depthOf,
+  isCurator,
+  observedKinds,
+  signInOf,
+  updatedAt,
+  type LauncherContext,
+} from "@keyhall/core/launcher";
 import type { Game } from "@keyhall/core/listing";
-import { Badge } from "@keyhall/ui/components/badge";
 import { Button } from "@keyhall/ui/components/button";
 import { Card, CardContent } from "@keyhall/ui/components/card";
 import { PlayIcon, SealCheckIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { DEPTH, SIGN_IN, SignInBadge } from "./badges.tsx";
+import { DEPTH, DepthBadge, SIGN_IN, SignInBadge, verifiers } from "./badges.tsx";
+import { LabelDialog } from "./LabelDialog.tsx";
 import { formatDate, Launcher } from "./launcher.ts";
 import { FriendsPlaying } from "./Friends.tsx";
 import { Cover } from "./Library.tsx";
@@ -21,10 +30,42 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function Checks<T extends string>({
+  verdict,
+  label,
+  context,
+}: {
+  verdict: Verdict<T>;
+  label: (claim: Claim<T>) => string;
+  context: LauncherContext;
+}) {
+  const by = verifiers(context, verdict);
+  const said = (c: Claim<T>) =>
+    c.from === "window"
+      ? label(c)
+      : `${c.from === "listing" ? "The listing" : curatorName(context, c.from)} says ${label(c)}.`;
+  return (
+    <>
+      {by && <span className="block text-emerald-300">Verified by {by}.</span>}
+      {verdict.conflicts.map((c) => (
+        <span key={c.from} className="block text-amber-300">
+          {said(c)}
+        </span>
+      ))}
+    </>
+  );
+}
+
+const seenSignIn = ({ value }: Claim<string>) =>
+  value === "signer"
+    ? "The game window saw it sign in through Keyhall."
+    : "The game window saw a field asking for a private key.";
+
 export function GamePage({ game }: { game: Game }) {
   const context = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
-  const { depth, verified } = depthOf(context, game);
+  const signIn = signInOf(context, game);
+  const depth = depthOf(context, game);
   const kinds = observedKinds(context, game);
   const calls = context.calls.filter((c) => c.coordinate === game.coordinate);
   return (
@@ -51,6 +92,7 @@ export function GamePage({ game }: { game: Game }) {
               <SealCheckIcon data-icon="inline-start" />
               Test sign-in
             </Button>
+            {isCurator(context) && <LabelDialog game={game} depth={depth.value} />}
           </div>
         </div>
       </div>
@@ -69,18 +111,29 @@ export function GamePage({ game }: { game: Game }) {
           <CardContent>
             <dl className="grid gap-4 text-sm">
               <Fact label="Sign-in">
-                <SignInBadge signIn={game.signIn} /> {SIGN_IN[game.signIn].text}
+                <SignInBadge verdict={signIn} by={verifiers(context, signIn)} />{" "}
+                {SIGN_IN[signIn.value!].text}
+                <Checks
+                  verdict={signIn}
+                  context={context}
+                  label={(c) => (c.from === "window" ? seenSignIn(c) : SIGN_IN[c.value].label)}
+                />
               </Fact>
               <Fact label="Nostr depth">
-                {depth ? (
+                {depth.value ? (
                   <>
-                    <Badge variant="depth">{DEPTH[depth].label}</Badge>{" "}
-                    {verified ? "Seen in the game window. " : "Declared by the listing. "}
-                    {DEPTH[depth].text}
+                    <DepthBadge verdict={depth} by={verifiers(context, depth)} />{" "}
+                    {depth.seen
+                      ? "Seen in the game window. "
+                      : depth.verifiedBy.length
+                        ? ""
+                        : "Declared by the listing. "}
+                    {DEPTH[depth.value].text}
                   </>
                 ) : (
                   "Not declared yet; play to find out."
                 )}
+                <Checks verdict={depth} context={context} label={(c) => DEPTH[c.value].label} />
                 {kinds.length > 0 && (
                   <span className="block text-muted-foreground">
                     Kinds seen: {kinds.join(", ")}

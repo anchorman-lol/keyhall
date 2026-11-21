@@ -2,6 +2,7 @@ import { SimplePool } from "nostr-tools/pool";
 import type { Filter } from "nostr-tools/filter";
 import type { Event } from "nostr-tools/pure";
 import { listsFor, type CuratorList, type ListRef } from "./curation";
+import { AUTH_NS, DEPTH_NS, parseLabels, type Label } from "./labels";
 import { lastUpdated, parseListings, type Game } from "./listing";
 import type { Friend } from "./presence";
 import { payOverNwc, zapInvoice, type Payment, type WalletRequest } from "./zap";
@@ -76,6 +77,15 @@ export const subscribe = (filter: Filter, onevent: (event: Event) => void) => {
 
 export const publish = async (event: Event) =>
   void (await Promise.any(pool.publish(RELAYS, event)));
+
+export async function fetchLabels(curators: string[]): Promise<Label[]> {
+  const events = await pool.querySync(
+    RELAYS,
+    { kinds: [1985], authors: curators, "#L": [AUTH_NS, DEPTH_NS] },
+    { maxWait: 6000 },
+  );
+  return parseLabels(events);
+}
 
 async function github(repo: string, path: string, field: string): Promise<number | undefined> {
   const res = await fetch(`https://api.github.com/repos/${repo}${path}`).catch(() => undefined);

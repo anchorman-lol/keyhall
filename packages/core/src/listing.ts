@@ -1,4 +1,4 @@
-import type { Depth } from "./depth";
+import { DEPTHS, type Depth } from "./depth";
 
 export type SignIn = "signer" | "signer-or-nsec" | "nsec" | "throwaway" | "none" | "unknown";
 
@@ -33,7 +33,6 @@ export interface Recipient {
   lud16?: string;
 }
 
-const DEPTHS: readonly string[] = ["multiplayer", "identity", "none"] satisfies Depth[];
 const SIGNERS = ["nip07", "nip46", "nip55"];
 
 export function signInBadge(tags: string[][]): SignIn {

@@ -29,6 +29,30 @@ function install() {
     } catch {}
     return send.call(this, data);
   };
+
+  const KEY = /\bnsec|priv(ate)?[\s_-]*key|secret[\s_-]*key|\b[0-9a-f]{64}\b/i;
+  const keyShaped = (field: HTMLInputElement) =>
+    [
+      field.getAttribute("placeholder"),
+      field.getAttribute("name"),
+      field.getAttribute("id"),
+      field.getAttribute("aria-label"),
+      ...Array.from(field.labels ?? [], (l) => l.textContent),
+    ].some((text) => text && KEY.test(text));
+  const scan = () => {
+    if (![...document.querySelectorAll<HTMLInputElement>("input, textarea")].some(keyShaped))
+      return;
+    watch.disconnect();
+    invoke("nostr_key_field", {}).catch(() => {});
+  };
+  const watch = new MutationObserver(scan);
+  watch.observe(document, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["placeholder", "name", "id", "aria-label"],
+  });
+  scan();
 }
 
 export const shimScript = () => `(${install.toString()})();`;
