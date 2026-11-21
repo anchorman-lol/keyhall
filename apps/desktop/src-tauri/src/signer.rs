@@ -10,6 +10,16 @@ pub struct EventRequest {
     pub created_at: u64,
 }
 
+/// Kinds the launcher window signs for presence: NIP-59 seals and NIP-38 statuses.
+const LAUNCHER_KINDS: [u16; 2] = [13, 30315];
+
+pub fn sign_for_launcher(keys: &Keys, req: &EventRequest) -> Result<Event, String> {
+    if !LAUNCHER_KINDS.contains(&req.kind) {
+        return Err(format!("The launcher doesn't sign kind {}", req.kind));
+    }
+    sign(keys, req)
+}
+
 pub fn sign(keys: &Keys, req: &EventRequest) -> Result<Event, String> {
     let unsigned = json!({
         "pubkey": keys.public_key().to_hex(),
@@ -56,6 +66,20 @@ mod tests {
         let event = sign(&keys, &req).unwrap();
         assert!(event.verify().is_ok());
         assert_eq!(event.pubkey, keys.public_key());
+    }
+
+    #[test]
+    fn the_launcher_signs_only_presence_kinds() {
+        let keys = Keys::generate();
+        let req = |kind: u16| {
+            request(&format!(
+                r#"{{"kind":{kind},"content":"","tags":[],"created_at":1}}"#
+            ))
+            .unwrap()
+        };
+        assert!(sign_for_launcher(&keys, &req(30315)).is_ok());
+        assert!(sign_for_launcher(&keys, &req(13)).is_ok());
+        assert!(sign_for_launcher(&keys, &req(1)).is_err());
     }
 
     #[test]

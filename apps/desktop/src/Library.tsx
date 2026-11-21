@@ -2,6 +2,7 @@ import { depthOf, library, sourceLabel, updatedAt } from "@keyhall/core/launcher
 import type { Game } from "@keyhall/core/listing";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@keyhall/ui/components/empty";
 import { DepthBadge, SignInBadge } from "./badges.tsx";
+import { FriendsPlaying } from "./Friends.tsx";
 import { formatDate, Launcher } from "./launcher.ts";
 
 export function Cover({ game, className }: { game: Game; className: string }) {
@@ -57,6 +58,7 @@ export function Library() {
                   <SignInBadge signIn={game.signIn} />
                   <DepthBadge depth={depth} verified={verified} />
                 </div>
+                <FriendsPlaying coordinate={game.coordinate} />
               </div>
             </button>
           );

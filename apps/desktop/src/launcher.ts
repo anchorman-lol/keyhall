@@ -1,5 +1,13 @@
 import { launcherMachine, type ShimCall, type SignRequest } from "@keyhall/core/launcher";
-import { fetchGames, fetchLastUpdated, fetchListings, fetchLists } from "@keyhall/core/relays";
+import {
+  fetchFriends,
+  fetchGames,
+  fetchLastUpdated,
+  fetchListings,
+  fetchLists,
+  publish,
+  subscribe,
+} from "@keyhall/core/relays";
 import { loadSources } from "@keyhall/core/sources";
 import { shimScript } from "@keyhall/core/shim";
 import { invoke } from "@tauri-apps/api/core";
@@ -36,6 +44,9 @@ const machine = launcherMachine(
         listen<{ coordinate: string; kinds: number[] }>("observed", ({ payload }) =>
           send({ type: "observed", ...payload }),
         ),
+        listen<{ coordinate: string }>("closed", ({ payload }) =>
+          send({ type: "closed", ...payload }),
+        ),
         listen<SignRequest>("sign-request", ({ payload }) =>
           send({ type: "sign-request", request: payload }),
         ),
@@ -44,9 +55,20 @@ const machine = launcherMachine(
     },
     saveObserved: (observed) => localStorage.setItem("observed", JSON.stringify(observed)),
     saveSources: (sources) => localStorage.setItem("sources", JSON.stringify(sources)),
+    fetchFriends,
+    subscribe,
+    publish,
+    signEvent: (event) => invoke("sign_event", { event }),
+    nip44Encrypt: (pubkey, text) => invoke("nip44_encrypt", { pubkey, text }),
+    nip44Decrypt: (pubkey, text) => invoke("nip44_decrypt", { pubkey, text }),
+    savePresence: (presence, circle) =>
+      localStorage.setItem("presence", JSON.stringify({ presence, circle })),
   },
-  JSON.parse(localStorage.getItem("observed") ?? "{}"),
-  loadSources(JSON.parse(localStorage.getItem("sources") ?? "null")),
+  {
+    observed: JSON.parse(localStorage.getItem("observed") ?? "{}"),
+    sources: loadSources(JSON.parse(localStorage.getItem("sources") ?? "null")),
+    ...JSON.parse(localStorage.getItem("presence") ?? "{}"),
+  },
 );
 
 export const Launcher = createActorContext(machine);

@@ -7,7 +7,9 @@ import { PlayIcon, SealCheckIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { DEPTH, SIGN_IN, SignInBadge } from "./badges.tsx";
 import { formatDate, Launcher } from "./launcher.ts";
+import { FriendsPlaying } from "./Friends.tsx";
 import { Cover } from "./Library.tsx";
+import { ModeToggle } from "./PresenceSettings.tsx";
 import { SignerLog } from "./SignerLog.tsx";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -32,6 +34,9 @@ export function GamePage({ game }: { game: Game }) {
         <div className="self-center">
           <h1 className="text-3xl font-semibold">{game.name}</h1>
           <p className="mt-2 max-w-prose text-muted-foreground">{game.about}</p>
+          <div className="mt-3">
+            <FriendsPlaying coordinate={game.coordinate} />
+          </div>
           <div className="mt-5 flex gap-2">
             <Button size="lg" onClick={() => send({ type: "play", game })}>
               <PlayIcon weight="fill" data-icon="inline-start" />
@@ -81,6 +86,9 @@ export function GamePage({ game }: { game: Game }) {
                     Kinds seen: {kinds.join(", ")}
                   </span>
                 )}
+              </Fact>
+              <Fact label="Your presence">
+                <ModeToggle coordinate={game.coordinate} />
               </Fact>
               <Fact label="Last updated">{formatDate(updatedAt(context, game))}</Fact>
               <Fact label="Plays at">{game.url}</Fact>

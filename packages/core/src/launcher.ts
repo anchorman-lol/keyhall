@@ -5,7 +5,23 @@ import { parseListRef, PICKS, type CuratorList, type ListRef } from "./curation"
 import { classifyDepth, resolveDepth, type Observation } from "./depth";
 import type { Game } from "./listing";
 import {
+  DEFAULT_PRESENCE,
+  modeFor,
+  publishPresence,
+  STATUS_TTL,
+  watchFriends,
+  type Circle,
+  type Friend,
+  type PresenceDeps,
+  type PresenceMode,
+  type PresenceSettings,
+  type Published,
+  type PublishInput,
+  type Status,
+} from "./presence";
+import {
   addCurator,
+  defaultSources,
   PICKS_ID,
   removeCurator,
   sourceList,
@@ -32,11 +48,12 @@ export interface SignRequest {
 export type LauncherEvent =
   | { type: "shim"; call: ShimCall }
   | { type: "observed"; coordinate: string; kinds: number[] }
+  | { type: "closed"; coordinate: string }
   | { type: "sign-request"; request: SignRequest };
 
 type KeyCommand = "generate_key" | "import_key";
 
-export interface LauncherDeps {
+export interface LauncherDeps extends PresenceDeps {
   keyStatus(): Promise<string | null>;
   saveKey(command: KeyCommand, nsec?: string): Promise<string>;
   fetchLists(ref: ListRef): Promise<CuratorList[]>;
@@ -49,6 +66,15 @@ export interface LauncherDeps {
   answer(id: number, allow: boolean): void;
   listen(send: (event: LauncherEvent) => void): () => void;
   saveObserved(observed: Record<string, Observation>): void;
+  fetchFriends(pubkey: string): Promise<Friend[]>;
+  savePresence(presence: PresenceSettings, circle: Circle | undefined): void;
+}
+
+export interface Stored {
+  observed: Record<string, Observation>;
+  presence: PresenceSettings;
+  circle: Circle;
+  sources: SourceSettings;
 }
 
 export interface Fetched {
@@ -70,6 +96,12 @@ export interface LauncherContext {
   windows: Record<string, string>;
   requests: SignRequest[];
   current?: Game;
+  settings: boolean;
+  friends?: Friend[];
+  statuses: Record<string, Status>;
+  presence: PresenceSettings;
+  circle?: Circle;
+  published?: Published;
 }
 
 type Events =
@@ -85,7 +117,11 @@ type Events =
   | { type: "source.add"; input: string }
   | { type: "source.remove"; id: string }
   | { type: "source.loaded"; id: string; lists: CuratorList[]; games: Game[] }
-  | { type: "updated"; coordinate: string; time: number };
+  | { type: "updated"; coordinate: string; time: number }
+  | { type: "settings" }
+  | { type: "presence.mode"; mode: PresenceMode }
+  | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
+  | { type: "friend-status"; pubkey: string; at: number; status?: Status };
 
 const record = (
   context: LauncherContext,
@@ -139,11 +175,31 @@ export function depthOf(context: LauncherContext, game: Game) {
   return resolveDepth(game.depth, seen && classifyDepth(seen));
 }
 
-export const launcherMachine = (
-  deps: LauncherDeps,
-  observed: Record<string, Observation>,
-  sources: SourceSettings,
-) =>
+const pubkeyOf = (context: LauncherContext) =>
+  context.npub ? (decode(context.npub as `npub1${string}`).data as string) : undefined;
+
+export function wantedPresence(context: LauncherContext): Published | undefined {
+  const coordinate = Object.keys(context.windows).findLast(
+    (c) => modeFor(context.presence, c) !== "hidden",
+  );
+  return coordinate ? { mode: modeFor(context.presence, coordinate), coordinate } : undefined;
+}
+
+const needsPublish = (context: LauncherContext) => {
+  const wanted = wantedPresence(context);
+  const { published } = context;
+  const same = wanted?.mode === published?.mode && wanted?.coordinate === published?.coordinate;
+  return !!context.npub && !same && (wanted?.mode !== "friends" || !!context.friends);
+};
+
+export function playing(context: LauncherContext, now = Date.now() / 1000) {
+  return (context.friends ?? []).flatMap((friend) => {
+    const status = context.statuses[friend.pubkey];
+    return status && status.expires > now ? [{ friend, status }] : [];
+  });
+}
+
+export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
   setup({
     types: {} as { context: LauncherContext; events: Events },
     actors: {
@@ -173,6 +229,16 @@ export const launcherMachine = (
           .openGame(input)
           .then((label) => sendBack({ type: "opened", coordinate: input.coordinate, label }));
       }),
+      fetchFriends: fromPromise<Friend[], string>(({ input }) => deps.fetchFriends(input)),
+      watchFriends: fromCallback<Events, { me: string; follows: string[] }>(({ input, sendBack }) =>
+        watchFriends(deps, input.me, input.follows, (pubkey, at, status) =>
+          sendBack({ type: "friend-status", pubkey, at, status }),
+        ),
+      ),
+      publishPresence: fromPromise<
+        { published: Published | undefined; circle: Circle | undefined },
+        PublishInput
+      >(({ input }) => publishPresence(deps, input)),
     },
     actions: {
       saveObserved: ({ context }) => deps.saveObserved(context.observed),
@@ -184,12 +250,14 @@ export const launcherMachine = (
         for (const source of wanted) enqueue.spawnChild("fetchSource", { input: source });
         enqueue.assign({ loading: [...context.loading, ...wanted.map((s) => s.id)] });
       }),
+      savePresence: ({ context }) => deps.savePresence(context.presence, context.circle),
     },
+    delays: { refresh: (STATUS_TTL - 10 * 60) * 1000 },
   }).createMachine({
     id: "launcher",
     type: "parallel",
     context: {
-      sources,
+      sources: stored.sources ?? defaultSources,
       sourceError: "",
       fetched: {},
       listings: {},
@@ -198,9 +266,13 @@ export const launcherMachine = (
       npub: null,
       keyError: "",
       calls: [],
-      observed,
+      observed: stored.observed ?? {},
       windows: {},
       requests: [],
+      settings: false,
+      statuses: {},
+      presence: stored.presence ?? DEFAULT_PRESENCE,
+      circle: stored.circle,
     },
     invoke: { src: "listen" },
     entry: "fetchSources",
@@ -252,7 +324,37 @@ export const launcherMachine = (
           updated: ({ context, event }) => ({ ...context.updated, [event.coordinate]: event.time }),
         }),
       },
-      select: { actions: assign({ current: ({ event }) => event.game }) },
+      select: { actions: assign({ current: ({ event }) => event.game, settings: false }) },
+      settings: { actions: assign({ current: undefined, settings: true }) },
+      "presence.mode": {
+        actions: [
+          assign({ presence: ({ context, event }) => ({ ...context.presence, mode: event.mode }) }),
+          "savePresence",
+        ],
+      },
+      "presence.game": {
+        actions: [
+          assign({
+            presence: ({ context, event: { coordinate, mode } }) => {
+              const { [coordinate]: _, ...games } = context.presence.games;
+              return {
+                ...context.presence,
+                games: mode ? { ...games, [coordinate]: mode } : games,
+              };
+            },
+          }),
+          "savePresence",
+        ],
+      },
+      "friend-status": {
+        guard: ({ context, event }) => (context.statuses[event.pubkey]?.at ?? 0) <= event.at,
+        actions: assign({
+          statuses: ({ context, event: { pubkey, status } }) => {
+            const { [pubkey]: _, ...rest } = context.statuses;
+            return status ? { ...rest, [pubkey]: status } : rest;
+          },
+        }),
+      },
       play: {
         actions: enqueueActions(({ enqueue, event }) =>
           enqueue.spawnChild("openGame", { input: event.game }),
@@ -260,10 +362,18 @@ export const launcherMachine = (
       },
       opened: {
         actions: assign({
-          windows: ({ context, event }) => ({
-            ...context.windows,
-            [event.coordinate]: event.label,
-          }),
+          windows: ({ context, event }) => {
+            const { [event.coordinate]: _, ...windows } = context.windows;
+            return { ...windows, [event.coordinate]: event.label };
+          },
+        }),
+      },
+      closed: {
+        actions: assign({
+          windows: ({ context, event }) => {
+            const { [event.coordinate]: _, ...windows } = context.windows;
+            return windows;
+          },
         }),
       },
       check: {
@@ -343,6 +453,76 @@ export const launcherMachine = (
             },
           },
           ready: {},
+        },
+      },
+      friends: {
+        initial: "waiting",
+        states: {
+          waiting: { always: { guard: ({ context }) => !!context.npub, target: "loading" } },
+          loading: {
+            invoke: {
+              src: "fetchFriends",
+              input: ({ context }) => pubkeyOf(context)!,
+              onDone: {
+                target: "ready",
+                actions: assign({ friends: ({ event }) => event.output }),
+              },
+              onError: { target: "ready", actions: assign({ friends: [] }) },
+            },
+          },
+          ready: {
+            invoke: {
+              src: "watchFriends",
+              input: ({ context }) => ({
+                me: pubkeyOf(context)!,
+                follows: context.friends!.map((f) => f.pubkey),
+              }),
+            },
+          },
+        },
+      },
+      presence: {
+        initial: "idle",
+        states: {
+          idle: {
+            always: { guard: ({ context }) => needsPublish(context), target: "publishing" },
+            after: {
+              refresh: {
+                guard: ({ context }) => !!context.published,
+                actions: assign({ published: undefined }),
+              },
+            },
+          },
+          publishing: {
+            invoke: {
+              src: "publishPresence",
+              input: ({ context }) => {
+                const wanted = wantedPresence(context);
+                return {
+                  me: pubkeyOf(context)!,
+                  wanted,
+                  game: wanted && findGame(context, wanted.coordinate),
+                  published: context.published,
+                  circle: context.circle,
+                  follows: (context.friends ?? []).map((f) => f.pubkey),
+                };
+              },
+              onDone: {
+                target: "idle",
+                actions: [
+                  assign({
+                    published: ({ event }) => event.output.published,
+                    circle: ({ event }) => event.output.circle,
+                  }),
+                  "savePresence",
+                ],
+              },
+              onError: {
+                target: "idle",
+                actions: assign({ published: ({ context }) => wantedPresence(context) }),
+              },
+            },
+          },
         },
       },
       signer: {

@@ -1,4 +1,7 @@
-import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
+import { matchFilter, type Filter } from "nostr-tools/filter";
+import { unwrapEvent, wrapEvent } from "nostr-tools/nip59";
+import { finalizeEvent, generateSecretKey, getPublicKey, type Event } from "nostr-tools/pure";
+import { bytesToHex } from "nostr-tools/utils";
 import { npubEncode } from "nostr-tools/nip19";
 import { describe, expect, it, vi } from "vitest";
 import { createActor, waitFor } from "xstate";
@@ -8,12 +11,16 @@ import {
   findGame,
   launcherMachine,
   library,
+  playing,
   sourceLabel,
   type LauncherDeps,
   type LauncherEvent,
+  type Stored,
 } from "./launcher";
 import type { Game } from "./listing";
-import { defaultSources, PICKS_ID, UNVETTED_ID, type SourceSettings } from "./sources";
+import { circlePubkey, circleStatus, publicStatus, readStatus } from "./presence";
+import { signerFor } from "./signer.testing";
+import { defaultSources, PICKS_ID, UNVETTED_ID } from "./sources";
 
 const secret = generateSecretKey();
 const npub = npubEncode(getPublicKey(secret));
@@ -36,7 +43,23 @@ const relays: Record<string, Game[]> = {
   [curatorKey]: [game, spam],
 };
 
-function start(deps: Partial<LauncherDeps> = {}, sources: SourceSettings = defaultSources) {
+function relay(events: Event[] = []) {
+  const subs: [Filter, (e: Event) => void][] = [];
+  const published: Event[] = [];
+  return {
+    published,
+    deliver: (e: Event) => subs.forEach(([f, cb]) => matchFilter(f, e) && cb(e)),
+    subscribe: (filter: Filter, onEvent: (e: Event) => void) => {
+      const sub: [Filter, (e: Event) => void] = [filter, onEvent];
+      subs.push(sub);
+      events.filter((e) => matchFilter(filter, e)).forEach(onEvent);
+      return () => subs.splice(subs.indexOf(sub), 1);
+    },
+    publish: vi.fn(async (e: Event) => void published.push(e)),
+  };
+}
+
+function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
   let emit: (event: LauncherEvent) => void = () => {};
   const all: LauncherDeps = {
     keyStatus: async () => null,
@@ -55,9 +78,13 @@ function start(deps: Partial<LauncherDeps> = {}, sources: SourceSettings = defau
       return () => {};
     },
     saveObserved: vi.fn(),
+    ...signerFor(secret),
+    ...relay(),
+    fetchFriends: async () => [],
+    savePresence: vi.fn(),
     ...deps,
   };
-  const actor = createActor(launcherMachine(all, {}, sources)).start();
+  const actor = createActor(launcherMachine(all, stored)).start();
   return { actor, deps: all, emit: (e: LauncherEvent) => emit(e) };
 }
 
@@ -167,7 +194,13 @@ describe("library", () => {
   it("loads saved curators on start and rejects input that isn't an npub or naddr", async () => {
     const { actor } = start(
       {},
-      { picks: false, unvetted: false, curators: [{ ref: { pubkey: curatorKey }, enabled: true }] },
+      {
+        sources: {
+          picks: false,
+          unvetted: false,
+          curators: [{ ref: { pubkey: curatorKey }, enabled: true }],
+        },
+      },
     );
     await waitFor(actor, loaded);
     expect(library(actor.getSnapshot().context).map((e) => e.game)).toEqual([game, spam]);
@@ -236,5 +269,119 @@ describe("signer", () => {
     expect(context.observed[game.coordinate]).toEqual({ kinds: [0, 1, 9735], signer: true });
     expect(deps.saveObserved).toHaveBeenLastCalledWith(context.observed);
     expect(depthOf(context, game)).toEqual({ depth: "identity", verified: true });
+  });
+});
+
+const sam = generateSecretKey();
+const mira = generateSecretKey();
+const friends = [sam, mira].map((k, i) => ({ pubkey: getPublicKey(k), name: ["sam", "mira"][i] }));
+const now = () => Math.floor(Date.now() / 1000);
+
+describe("friends", () => {
+  it("loads the follow list once the key is ready and shows public and friends-only presence", async () => {
+    const fetchFriends = vi.fn(async () => friends);
+    const circle = bytesToHex(generateSecretKey());
+    const mock = relay([
+      finalizeEvent(publicStatus(game, now()), sam),
+      wrapEvent(
+        { kind: 30078, content: circle, tags: [["d", "keyhall/presence"]] },
+        mira,
+        getPublicKey(secret),
+      ),
+      circleStatus(circle, { ...game, name: "Word5", coordinate: "31990:abc:word5" }, now()),
+      finalizeEvent(publicStatus(game, now()), generateSecretKey()),
+    ]);
+    const { actor } = start({ keyStatus: async () => npub, fetchFriends, ...mock });
+    await waitFor(actor, (s) => playing(s.context).length === 2);
+    expect(fetchFriends).toHaveBeenCalledWith(getPublicKey(secret));
+    expect(
+      playing(actor.getSnapshot().context).map((p) => [p.friend.name, p.status.content]),
+    ).toEqual([
+      ["sam", "Playing Blockstr"],
+      ["mira", "Playing Word5"],
+    ]);
+    mock.deliver(finalizeEvent({ ...publicStatus(undefined, now() + 1) }, sam));
+    expect(playing(actor.getSnapshot().context).map((p) => p.friend.name)).toEqual(["mira"]);
+  });
+
+  it("drops expired statuses and stale clears", async () => {
+    const mock = relay();
+    const { actor } = start({
+      keyStatus: async () => npub,
+      fetchFriends: async () => friends,
+      ...mock,
+    });
+    await waitFor(actor, (s) => s.matches({ friends: "ready" }));
+    mock.deliver(finalizeEvent(publicStatus(game, now() - 4 * 3600), sam));
+    expect(playing(actor.getSnapshot().context)).toEqual([]);
+    mock.deliver(finalizeEvent(publicStatus(game, now()), sam));
+    mock.deliver(finalizeEvent(publicStatus(undefined, now() - 60), sam));
+    expect(playing(actor.getSnapshot().context)).toHaveLength(1);
+  });
+});
+
+describe("presence", () => {
+  async function playWith(settings?: Stored["presence"]) {
+    const mock = relay();
+    const savePresence = vi.fn();
+    const run = start(
+      { keyStatus: async () => npub, fetchFriends: async () => friends, savePresence, ...mock },
+      settings && { presence: settings },
+    );
+    await waitFor(run.actor, (s) => s.matches({ friends: "ready" }));
+    run.actor.send({ type: "play", game });
+    return { ...run, mock, savePresence };
+  }
+
+  it("is friends only by default: sends the circle key to each friend, then one encrypted status", async () => {
+    const { actor, mock, emit, savePresence } = await playWith();
+    await waitFor(actor, (s) => s.context.published?.coordinate === game.coordinate);
+    const wraps = mock.published.filter((e) => e.kind === 1059);
+    const [status] = mock.published.filter((e) => e.kind === 30315);
+    const { circle } = actor.getSnapshot().context;
+    expect(
+      wraps.map((w) => unwrapEvent(w, w.tags[0]![1] === friends[0]!.pubkey ? sam : mira).content),
+    ).toEqual([circle!.secret, circle!.secret]);
+    expect(status!.pubkey).toBe(circlePubkey(circle!.secret));
+    expect(readStatus(status!, circle!.secret)?.content).toBe("Playing Blockstr");
+    expect(savePresence).toHaveBeenLastCalledWith(expect.anything(), circle);
+
+    emit({ type: "closed", coordinate: game.coordinate });
+    await waitFor(actor, (s) => !s.context.published && s.matches({ presence: "idle" }));
+    const clear = mock.published.at(-1)!;
+    expect([clear.kind, clear.pubkey, clear.content]).toEqual([30315, status!.pubkey, ""]);
+    expect(mock.published.filter((e) => e.kind === 1059)).toHaveLength(2);
+  });
+
+  it("publishes a public status under the player's key for a public game, and clears it when hidden", async () => {
+    const { actor, mock } = await playWith({
+      mode: "friends",
+      games: { [game.coordinate]: "public" },
+    });
+    await waitFor(actor, (s) => s.context.published?.mode === "public");
+    const [status] = mock.published;
+    expect(mock.published).toHaveLength(1);
+    expect(status!.pubkey).toBe(getPublicKey(secret));
+    expect(readStatus(status!)?.coordinate).toBe(game.coordinate);
+    actor.send({ type: "presence.game", coordinate: game.coordinate, mode: "hidden" });
+    await waitFor(actor, (s) => !s.context.published && s.matches({ presence: "idle" }));
+    expect(mock.published.at(-1)).toMatchObject({ pubkey: getPublicKey(secret), content: "" });
+  });
+
+  it("publishes nothing for hidden games", async () => {
+    const { actor, mock } = await playWith({ mode: "hidden", games: {} });
+    await waitFor(actor, (s) => !!s.context.windows[game.coordinate]);
+    expect(actor.getSnapshot().matches({ presence: "idle" })).toBe(true);
+    expect(mock.published).toEqual([]);
+  });
+
+  it("removes a per-game override and saves the settings", async () => {
+    const savePresence = vi.fn();
+    const { actor } = start({ savePresence });
+    actor.send({ type: "presence.game", coordinate: game.coordinate, mode: "public" });
+    actor.send({ type: "presence.mode", mode: "hidden" });
+    actor.send({ type: "presence.game", coordinate: game.coordinate });
+    expect(actor.getSnapshot().context.presence).toEqual({ mode: "hidden", games: {} });
+    expect(savePresence).toHaveBeenCalledTimes(3);
   });
 });
