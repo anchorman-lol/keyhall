@@ -72,6 +72,13 @@ describe("key", () => {
 });
 
 describe("library", () => {
+  it("loads while the key check waits on a keychain prompt", async () => {
+    const { actor } = start({ keyStatus: () => new Promise(() => {}) });
+    await waitFor(actor, (s) => s.matches({ library: "ready" }));
+    expect(actor.getSnapshot().context.games).toEqual([game]);
+    expect(actor.getSnapshot().matches({ key: "checking" })).toBe(true);
+  });
+
   it("loads games, then their last-updated times", async () => {
     const { actor } = start();
     await waitFor(actor, (s) => s.matches({ library: "ready" }));

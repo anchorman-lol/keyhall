@@ -100,19 +100,30 @@ impl Launcher {
     }
 }
 
-#[tauri::command]
-fn key_status(state: State<Launcher>) -> Result<Option<String>, String> {
-    Ok(state.stored()?.map(|k| npub(&k)))
+/// Keychain calls can block on a macOS password prompt, so they run off the main thread.
+async fn keychain_task<T: Send + 'static>(
+    app: AppHandle,
+    task: impl FnOnce(&Launcher) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || task(&app.state::<Launcher>()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn generate_key(state: State<Launcher>) -> Result<String, String> {
-    state.store(Keys::generate())
+async fn key_status(app: AppHandle) -> Result<Option<String>, String> {
+    keychain_task(app, |l| Ok(l.stored()?.map(|k| npub(&k)))).await
 }
 
 #[tauri::command]
-fn import_key(state: State<Launcher>, nsec: String) -> Result<String, String> {
-    state.store(Keys::parse(nsec.trim()).map_err(|_| "That is not a valid nsec".to_string())?)
+async fn generate_key(app: AppHandle) -> Result<String, String> {
+    keychain_task(app, |l| l.store(Keys::generate())).await
+}
+
+#[tauri::command]
+async fn import_key(app: AppHandle, nsec: String) -> Result<String, String> {
+    let keys = Keys::parse(nsec.trim()).map_err(|_| "That is not a valid nsec".to_string())?;
+    keychain_task(app, |l| l.store(keys)).await
 }
 
 #[tauri::command]
@@ -171,13 +182,12 @@ fn answer_sign_request(state: State<Launcher>, id: u64, allow: bool) {
 }
 
 #[tauri::command]
-fn nostr_get_public_key(
-    app: AppHandle,
-    window: WebviewWindow,
-    state: State<Launcher>,
-) -> Result<String, String> {
-    let game = state.game(&window)?;
-    let pubkey = state.keys()?.public_key().to_hex();
+async fn nostr_get_public_key(app: AppHandle, window: WebviewWindow) -> Result<String, String> {
+    let game = app.state::<Launcher>().game(&window)?;
+    let pubkey = keychain_task(app.clone(), Launcher::keys)
+        .await?
+        .public_key()
+        .to_hex();
     let _ = app.emit_to("main", "shim", json!({"coordinate": game.coordinate}));
     Ok(pubkey)
 }
@@ -190,7 +200,7 @@ async fn nostr_sign_event(
     event: EventRequest,
 ) -> Result<Event, String> {
     let game = state.game(&window)?;
-    let keys = state.keys()?;
+    let keys = keychain_task(app.clone(), Launcher::keys).await?;
     let approval = (window.label().to_string(), event.kind);
     if !state.approved.lock().unwrap().contains(&approval) {
         let id = state.next_request.fetch_add(1, Ordering::Relaxed);
