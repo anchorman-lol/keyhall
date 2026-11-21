@@ -24,6 +24,13 @@ export interface Game {
   signIn: SignIn;
   depth: Depth | undefined;
   repos: string[];
+  payTo: Recipient[];
+}
+
+export interface Recipient {
+  pubkey: string;
+  weight: number;
+  lud16?: string;
 }
 
 const DEPTHS: readonly string[] = ["multiplayer", "identity", "none"] satisfies Depth[];
@@ -59,6 +66,15 @@ function metadata(content: string): Record<string, unknown> {
 export const isGame = (e: NostrEvent) =>
   e.tags.some((t) => t[0] === "t" && /^games?$/i.test(t[1] ?? ""));
 
+function payTo(e: NostrEvent, lud16: string | undefined): Recipient[] {
+  const zaps = e.tags.filter((t) => t[0] === "zap" && /^[0-9a-f]{64}$/.test(t[1] ?? ""));
+  if (!zaps.length) return lud16 ? [{ pubkey: e.pubkey, weight: 1, lud16 }] : [];
+  const weighted = zaps.some((t) => t[3]);
+  return zaps
+    .map((t) => ({ pubkey: t[1] as string, weight: weighted ? Number(t[3]) || 0 : 1 }))
+    .filter((r) => r.weight > 0);
+}
+
 function parseListing(e: NostrEvent, curated: boolean): Game | undefined {
   const d = tag(e, "d");
   if (e.kind !== 31990 || d === undefined || !(curated || isGame(e))) return undefined;
@@ -82,6 +98,7 @@ function parseListing(e: NostrEvent, curated: boolean): Game | undefined {
     repos: e.tags
       .filter((t) => t[0] === "a" && t[1]?.startsWith("30617:"))
       .map((t) => t[1] as string),
+    payTo: payTo(e, text("lud16")),
   };
 }
 

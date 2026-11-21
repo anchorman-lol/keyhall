@@ -5,14 +5,17 @@ import { bytesToHex } from "nostr-tools/utils";
 import { npubEncode } from "nostr-tools/nip19";
 import { describe, expect, it, vi } from "vitest";
 import { createActor, waitFor } from "xstate";
+import { monthKey, monthRange, previousMonth, type Session } from "./budget";
 import { PICKS_REF, type CuratorList, type ListRef } from "./curation";
 import {
   depthOf,
   findGame,
   launcherMachine,
   library,
+  monthSplit,
   playing,
   sourceLabel,
+  type BudgetSettings,
   type LauncherDeps,
   type LauncherEvent,
   type Stored,
@@ -82,6 +85,11 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     ...relay(),
     fetchFriends: async () => [],
     savePresence: vi.fn(),
+    sessions: async () => [],
+    walletStatus: async () => null,
+    connectWallet: async () => "relay.example",
+    pay: async () => {},
+    saveBudget: vi.fn(),
     ...deps,
   };
   const actor = createActor(launcherMachine(all, stored)).start();
@@ -383,5 +391,120 @@ describe("presence", () => {
     actor.send({ type: "presence.game", coordinate: game.coordinate });
     expect(actor.getSnapshot().context.presence).toEqual({ mode: "hidden", games: {} });
     expect(savePresence).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("budget", () => {
+  const lastMonth = previousMonth(monthKey(new Date()));
+  const [from] = monthRange(lastMonth);
+  const hours = (coordinate: string, h: number): Session => ({
+    coordinate,
+    start: from + 60,
+    end: from + 60 + h * 3600,
+  });
+  const chess = {
+    ...game,
+    coordinate: "chess",
+    payTo: [{ pubkey: "c", weight: 1, lud16: "c@x.io" }],
+  };
+  const words = { ...game, coordinate: "words", payTo: [{ pubkey: "w", weight: 1 }] };
+  const sessions = async () => [hours("chess", 3), hours("words", 1)];
+
+  async function ready(deps: Partial<LauncherDeps> = {}, budget?: BudgetSettings) {
+    const started = start(
+      {
+        fetchGames: async () => [chess, words],
+        walletStatus: async () => "relay.example",
+        sessions,
+        ...deps,
+      },
+      {
+        budget: budget ?? { sats: 1000, paid: {} },
+        sources: { picks: false, unvetted: true, curators: [] },
+      },
+    );
+    started.actor.send({ type: "view", view: "budget" });
+    await waitFor(
+      started.actor,
+      (s) => s.matches({ budget: "idle" }) && !!s.context.fetched[UNVETTED_ID],
+    );
+    await waitFor(started.actor, (s) => s.context.sessions.length > 0);
+    return started;
+  }
+
+  it("saves the monthly budget", () => {
+    const { actor, deps } = start();
+    actor.send({ type: "budget.set", sats: 5000 });
+    expect(deps.saveBudget).toHaveBeenCalledWith({ sats: 5000, paid: {} });
+    expect(actor.getSnapshot().context.budget.sats).toBe(5000);
+  });
+
+  it("connects a wallet and shows its errors", async () => {
+    const connectWallet = vi.fn(async (uri: string) => {
+      if (uri === "bad") throw "That is not a nostr+walletconnect URI";
+      return "relay.example";
+    });
+    const { actor } = start({ connectWallet });
+    await waitFor(actor, (s) => s.matches({ budget: "idle" }));
+    actor.send({ type: "wallet.connect", uri: "bad" });
+    await waitFor(actor, (s) => s.context.walletError !== "");
+    expect(actor.getSnapshot().context.wallet).toBeNull();
+    actor.send({ type: "wallet.connect", uri: "nostr+walletconnect://x" });
+    await waitFor(actor, (s) => s.context.wallet === "relay.example");
+    expect(actor.getSnapshot().context.walletError).toBe("");
+  });
+
+  it("opens the budget page with fresh play time", async () => {
+    const { actor } = await ready();
+    expect(actor.getSnapshot().context.view).toBe("budget");
+    const { shares } = monthSplit(actor.getSnapshot().context, lastMonth);
+    expect(shares.map((s) => [s.coordinate, s.sats])).toEqual([
+      ["chess", 743],
+      ["words", 247],
+    ]);
+    actor.send({ type: "select", game });
+    expect(actor.getSnapshot().context.view).toBeUndefined();
+  });
+
+  it("pays last month's split once, after the player confirms", async () => {
+    const pay = vi.fn<LauncherDeps["pay"]>(async () => {});
+    const { actor, deps } = await ready({ pay });
+    expect(pay).not.toHaveBeenCalled();
+    actor.send({ type: "budget.pay", month: lastMonth });
+    await waitFor(actor, (s) => s.matches({ budget: "idle" }) && pay.mock.calls.length === 2);
+    expect(pay.mock.calls.map(([p]) => p)).toEqual([
+      { key: "chess c", coordinate: "chess", pubkey: "c", lud16: "c@x.io", sats: 743 },
+      { key: "words w", coordinate: "words", pubkey: "w", sats: 247 },
+    ]);
+    expect(deps.saveBudget).toHaveBeenLastCalledWith({
+      sats: 1000,
+      paid: { [lastMonth]: { "chess c": 743, "words w": 247 } },
+    });
+    expect(monthSplit(actor.getSnapshot().context, lastMonth).payments).toEqual([]);
+  });
+
+  it("keeps failed payments for a retry that skips the paid ones", async () => {
+    const pay = vi.fn(async (p: { key: string }) => {
+      if (p.key === "words w") throw new Error("no route");
+    });
+    const { actor } = await ready({ pay });
+    actor.send({ type: "budget.pay", month: lastMonth });
+    await waitFor(actor, (s) => s.context.payErrors["words w"] === "Error: no route");
+    await waitFor(actor, (s) => s.matches({ budget: "idle" }));
+    pay.mockClear();
+    actor.send({ type: "budget.pay", month: lastMonth });
+    await waitFor(actor, (s) => s.matches({ budget: "idle" }) && pay.mock.calls.length === 1);
+    expect(pay.mock.calls[0]![0].key).toBe("words w");
+  });
+
+  it("never pays the running month or without a wallet", async () => {
+    const pay = vi.fn<LauncherDeps["pay"]>(async () => {});
+    const { actor } = await ready({ pay });
+    actor.send({ type: "budget.pay", month: monthKey(new Date()) });
+    const noWallet = await ready({ pay, walletStatus: async () => null });
+    noWallet.actor.send({ type: "budget.pay", month: lastMonth });
+    expect(actor.getSnapshot().matches({ budget: "idle" })).toBe(true);
+    expect(noWallet.actor.getSnapshot().matches({ budget: "idle" })).toBe(true);
+    expect(pay).not.toHaveBeenCalled();
   });
 });

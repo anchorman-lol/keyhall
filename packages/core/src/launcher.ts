@@ -1,6 +1,7 @@
 import { decode, npubEncode } from "nostr-tools/nip19";
 import { verifyEvent, type Event } from "nostr-tools/pure";
 import { assign, enqueueActions, fromCallback, fromPromise, setup } from "xstate";
+import { monthKey, monthName, playTime, split, type Session } from "./budget";
 import { parseListRef, PICKS, type CuratorList, type ListRef } from "./curation";
 import { classifyDepth, resolveDepth, type Observation } from "./depth";
 import type { Game } from "./listing";
@@ -31,6 +32,7 @@ import {
   type Source,
   type SourceSettings,
 } from "./sources";
+import { payments, type Payment } from "./zap";
 
 export interface ShimCall {
   coordinate: string;
@@ -68,6 +70,16 @@ export interface LauncherDeps extends PresenceDeps {
   saveObserved(observed: Record<string, Observation>): void;
   fetchFriends(pubkey: string): Promise<Friend[]>;
   savePresence(presence: PresenceSettings, circle: Circle | undefined): void;
+  sessions(): Promise<Session[]>;
+  walletStatus(): Promise<string | null>;
+  connectWallet(uri: string): Promise<string>;
+  pay(payment: Payment, comment: string): Promise<void>;
+  saveBudget(budget: BudgetSettings): void;
+}
+
+export interface BudgetSettings {
+  sats: number;
+  paid: Record<string, Record<string, number>>;
 }
 
 export interface Stored {
@@ -75,6 +87,7 @@ export interface Stored {
   presence: PresenceSettings;
   circle: Circle;
   sources: SourceSettings;
+  budget: BudgetSettings;
 }
 
 export interface Fetched {
@@ -96,12 +109,17 @@ export interface LauncherContext {
   windows: Record<string, string>;
   requests: SignRequest[];
   current?: Game;
-  settings: boolean;
+  view?: "budget" | "settings";
   friends?: Friend[];
   statuses: Record<string, Status>;
   presence: PresenceSettings;
   circle?: Circle;
   published?: Published;
+  budget: BudgetSettings;
+  sessions: Session[];
+  wallet: string | null;
+  walletError: string;
+  payErrors: Record<string, string>;
 }
 
 type Events =
@@ -118,10 +136,16 @@ type Events =
   | { type: "source.remove"; id: string }
   | { type: "source.loaded"; id: string; lists: CuratorList[]; games: Game[] }
   | { type: "updated"; coordinate: string; time: number }
-  | { type: "settings" }
+  | { type: "view"; view: "budget" | "settings" }
   | { type: "presence.mode"; mode: PresenceMode }
   | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
-  | { type: "friend-status"; pubkey: string; at: number; status?: Status };
+  | { type: "friend-status"; pubkey: string; at: number; status?: Status }
+  | { type: "sessions"; sessions: Session[] }
+  | { type: "budget.set"; sats: number }
+  | { type: "wallet.connect"; uri: string }
+  | { type: "budget.pay"; month: string }
+  | { type: "zap.done"; month: string; payment: Payment; error?: string }
+  | { type: "zap.finished" };
 
 const record = (
   context: LauncherContext,
@@ -199,6 +223,22 @@ export function playing(context: LauncherContext, now = Date.now() / 1000) {
   });
 }
 
+export function monthSplit(context: LauncherContext, month: string) {
+  const games = Object.values(context.listings);
+  const paid = context.budget.paid[month] ?? {};
+  const { shares, reserve } = split(
+    context.budget.sats,
+    playTime(context.sessions, month),
+    (c) => !!findGame(context, c)?.payTo.length,
+  );
+  return {
+    shares,
+    reserve,
+    paid,
+    payments: payments(shares, games).filter((p) => !(p.key in paid)),
+  };
+}
+
 export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
   setup({
     types: {} as { context: LauncherContext; events: Events },
@@ -239,6 +279,22 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         { published: Published | undefined; circle: Circle | undefined },
         PublishInput
       >(({ input }) => publishPresence(deps, input)),
+      loadSessions: fromCallback<Events>(({ sendBack }) => {
+        void deps.sessions().then((sessions) => sendBack({ type: "sessions", sessions }));
+      }),
+      walletStatus: fromPromise(() => deps.walletStatus()),
+      connectWallet: fromPromise<string, string>(({ input }) => deps.connectWallet(input)),
+      pay: fromCallback<Events, { month: string; payments: Payment[] }>(({ input, sendBack }) => {
+        void (async () => {
+          for (const payment of input.payments) {
+            const error = await deps
+              .pay(payment, `Keyhall monthly budget, ${monthName(input.month)}`)
+              .then(() => undefined, String);
+            sendBack({ type: "zap.done", month: input.month, payment, error });
+          }
+          sendBack({ type: "zap.finished" });
+        })();
+      }),
     },
     actions: {
       saveObserved: ({ context }) => deps.saveObserved(context.observed),
@@ -251,6 +307,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         enqueue.assign({ loading: [...context.loading, ...wanted.map((s) => s.id)] });
       }),
       savePresence: ({ context }) => deps.savePresence(context.presence, context.circle),
+      saveBudget: ({ context }) => deps.saveBudget(context.budget),
     },
     delays: { refresh: (STATUS_TTL - 10 * 60) * 1000 },
   }).createMachine({
@@ -269,10 +326,14 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       observed: stored.observed ?? {},
       windows: {},
       requests: [],
-      settings: false,
       statuses: {},
       presence: stored.presence ?? DEFAULT_PRESENCE,
       circle: stored.circle,
+      budget: stored.budget ?? { sats: 0, paid: {} },
+      sessions: [],
+      wallet: null,
+      walletError: "",
+      payErrors: {},
     },
     invoke: { src: "listen" },
     entry: "fetchSources",
@@ -324,8 +385,15 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           updated: ({ context, event }) => ({ ...context.updated, [event.coordinate]: event.time }),
         }),
       },
-      select: { actions: assign({ current: ({ event }) => event.game, settings: false }) },
-      settings: { actions: assign({ current: undefined, settings: true }) },
+      select: { actions: assign({ current: ({ event }) => event.game, view: undefined }) },
+      view: {
+        actions: [
+          assign({ current: undefined, view: ({ event }) => event.view }),
+          enqueueActions(({ enqueue, event }) => {
+            if (event.view === "budget") enqueue.spawnChild("loadSessions");
+          }),
+        ],
+      },
       "presence.mode": {
         actions: [
           assign({ presence: ({ context, event }) => ({ ...context.presence, mode: event.mode }) }),
@@ -354,6 +422,13 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
             return status ? { ...rest, [pubkey]: status } : rest;
           },
         }),
+      },
+      sessions: { actions: assign({ sessions: ({ event }) => event.sessions }) },
+      "budget.set": {
+        actions: [
+          assign({ budget: ({ context, event }) => ({ ...context.budget, sats: event.sats }) }),
+          "saveBudget",
+        ],
       },
       play: {
         actions: enqueueActions(({ enqueue, event }) =>
@@ -521,6 +596,79 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
                 target: "idle",
                 actions: assign({ published: ({ context }) => wantedPresence(context) }),
               },
+            },
+          },
+        },
+      },
+      budget: {
+        initial: "loading",
+        states: {
+          loading: {
+            invoke: {
+              src: "walletStatus",
+              onDone: { target: "idle", actions: assign({ wallet: ({ event }) => event.output }) },
+              onError: {
+                target: "idle",
+                actions: assign({ walletError: ({ event }) => String(event.error) }),
+              },
+            },
+          },
+          idle: {
+            on: {
+              "wallet.connect": "connecting",
+              "budget.pay": {
+                guard: ({ context, event }) =>
+                  !!context.wallet && event.month < monthKey(new Date()),
+                target: "paying",
+              },
+            },
+          },
+          connecting: {
+            invoke: {
+              src: "connectWallet",
+              input: ({ event }) => (event.type === "wallet.connect" ? event.uri : ""),
+              onDone: {
+                target: "idle",
+                actions: assign({ wallet: ({ event }) => event.output, walletError: "" }),
+              },
+              onError: {
+                target: "idle",
+                actions: assign({ walletError: ({ event }) => String(event.error) }),
+              },
+            },
+          },
+          paying: {
+            entry: assign({ payErrors: {} }),
+            invoke: {
+              src: "pay",
+              input: ({ context, event }) => {
+                const month = event.type === "budget.pay" ? event.month : "";
+                return { month, payments: monthSplit(context, month).payments };
+              },
+            },
+            on: {
+              "zap.done": {
+                actions: [
+                  assign(({ context, event: { month, payment, error } }) =>
+                    error
+                      ? { payErrors: { ...context.payErrors, [payment.key]: error } }
+                      : {
+                          budget: {
+                            ...context.budget,
+                            paid: {
+                              ...context.budget.paid,
+                              [month]: {
+                                ...context.budget.paid[month],
+                                [payment.key]: payment.sats,
+                              },
+                            },
+                          },
+                        },
+                  ),
+                  "saveBudget",
+                ],
+              },
+              "zap.finished": "idle",
             },
           },
         },
