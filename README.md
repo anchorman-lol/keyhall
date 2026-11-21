@@ -4,6 +4,8 @@ A launcher and library for Nostr games. Every game you play opens in its own win
 
 Early work in progress: this is v0, desktop (macOS) first.
 
+![The Keyhall launcher beside a Blockstr window whose sign-in it verified](docs/screenshot.png)
+
 ## What v0 does
 
 - Lists games from relays: plain NIP-89 handler events (kind 31990) tagged `t=game` or `t=games`.
