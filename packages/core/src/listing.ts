@@ -1,0 +1,94 @@
+import type { Depth } from "./depth";
+
+export type SignIn = "signer" | "signer-or-nsec" | "nsec" | "throwaway" | "none" | "unknown";
+
+export interface NostrEvent {
+  kind: number;
+  id: string;
+  pubkey: string;
+  created_at: number;
+  content: string;
+  tags: string[][];
+  sig: string;
+}
+
+export interface Game {
+  coordinate: string;
+  pubkey: string;
+  name: string;
+  about: string | undefined;
+  picture: string | undefined;
+  banner: string | undefined;
+  url: string;
+  createdAt: number;
+  signIn: SignIn;
+  depth: Depth | undefined;
+  repos: string[];
+}
+
+const DEPTHS: readonly string[] = ["multiplayer", "identity", "none"] satisfies Depth[];
+const SIGNERS = ["nip07", "nip46", "nip55"];
+
+export function signInBadge(tags: string[][]): SignIn {
+  const methods = new Set(tags.filter((t) => t[0] === "auth").map((t) => t[1]));
+  const signer = SIGNERS.some((m) => methods.has(m));
+  if (methods.has("nsec")) return signer ? "signer-or-nsec" : "nsec";
+  if (signer) return "signer";
+  if (methods.has("guest") || methods.has("session")) return "throwaway";
+  if (methods.has("none")) return "none";
+  return "unknown";
+}
+
+export function lastUpdated(...times: (number | undefined)[]): number {
+  return Math.max(...times.filter((t) => t !== undefined));
+}
+
+const tag = (e: NostrEvent, name: string) => e.tags.find((t) => t[0] === name)?.[1];
+const https = (url: unknown) =>
+  typeof url === "string" && url.startsWith("https://") ? url : undefined;
+
+function metadata(content: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseListing(e: NostrEvent): Game | undefined {
+  const d = tag(e, "d");
+  const isGame = e.tags.some((t) => t[0] === "t" && /^games?$/i.test(t[1] ?? ""));
+  if (e.kind !== 31990 || d === undefined || !isGame) return undefined;
+  const meta = metadata(e.content);
+  const url = https(meta.website) ?? https(tag(e, "web")?.replace("<bech32>", ""));
+  if (!url) return undefined;
+  const text = (key: string) =>
+    typeof meta[key] === "string" && meta[key] ? meta[key] : undefined;
+  const depth = tag(e, "depth");
+  return {
+    coordinate: `31990:${e.pubkey}:${d}`,
+    pubkey: e.pubkey,
+    name: text("display_name") ?? text("name") ?? d,
+    about: text("about"),
+    picture: https(meta.picture),
+    banner: https(meta.banner),
+    url,
+    createdAt: e.created_at,
+    signIn: signInBadge(e.tags),
+    depth: depth && DEPTHS.includes(depth) ? (depth as Depth) : undefined,
+    repos: e.tags
+      .filter((t) => t[0] === "a" && t[1]?.startsWith("30617:"))
+      .map((t) => t[1] as string),
+  };
+}
+
+export function parseListings(events: NostrEvent[]): Game[] {
+  const newest = new Map<string, Game>();
+  for (const e of events) {
+    const game = parseListing(e);
+    const seen = game && newest.get(game.coordinate);
+    if (game && (!seen || seen.createdAt < game.createdAt)) newest.set(game.coordinate, game);
+  }
+  return [...newest.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
