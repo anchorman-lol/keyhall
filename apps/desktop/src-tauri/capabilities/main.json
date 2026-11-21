@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The launcher window: key setup and game windows. Game windows get their own capability at runtime.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "allow-key-status",
+    "allow-generate-key",
+    "allow-import-key",
+    "allow-open-game",
+    "allow-check-game",
+    "allow-answer-sign-request"
+  ]
+}

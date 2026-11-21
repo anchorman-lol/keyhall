@@ -1,0 +1,32 @@
+{
+  "name": "@keyhall/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "check-types": "tsc",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@keyhall/core": "workspace:*",
+    "@keyhall/ui": "workspace:*",
+    "@phosphor-icons/react": "catalog:",
+    "@tauri-apps/api": "2.12.5",
+    "@xstate/react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "xstate": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@tauri-apps/cli": "2.12.6",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "6.3.0",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

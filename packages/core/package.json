@@ -1,0 +1,23 @@
+{
+  "name": "@keyhall/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check-types": "tsc"
+  },
+  "dependencies": {
+    "nostr-tools": "catalog:",
+    "xstate": "catalog:"
+  },
+  "devDependencies": {
+    "jsdom": "31.0.1",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}
