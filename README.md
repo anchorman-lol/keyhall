@@ -12,6 +12,12 @@ Early work in progress: this is v0, desktop (macOS) first.
 - Shows a sign-in badge from the listing's `auth` tags (worst case wins), a Nostr depth badge (`multiplayer`, `identity` or `none`) and when the game was last updated.
 - Opens each web game in its own window with an injected `window.nostr` (`getPublicKey`, `signEvent`). Rust answers both. The first time a game asks to sign an event kind, the launcher window asks you to allow it; game windows can't answer that prompt.
 - Keeps your key in the macOS keychain. Create one or import an nsec; it stays in the Rust process.
+- Friends are your NIP-02 follow list (read only). The sidebar shows what they're playing, and game cards show which friends are in that game.
+- Presence: while a game window is open, Keyhall publishes a NIP-38 status (`30315`, `d=game`, “Playing Nochess”, expiring after 3 hours) when the window opens and clears it when it closes. Set Public, Friends only (the default) or Hidden for all games, and override it per game.
+
+### Friends-only presence
+
+Keyhall makes a circle key and sends its secret once to each follow as a NIP-59 gift wrap whose rumor is a kind `30078` event with `d=keyhall/presence`. Each status is then one `30315` event signed by the circle key, with its content and `a` tag NIP-44-encrypted to the circle. Unfollowing someone rotates the key the next time you play and re-sends it to everyone left. Keyhall reads friends' public statuses and, for each circle key a follow sent you, their encrypted ones.
 
 ### Listing tags
 
@@ -50,7 +56,7 @@ Unsigned builds change their code signature on every rebuild, so macOS asks for 
 
 - Publish Keyhall picks under the project's key (`PICKS_PUBKEY` in `packages/core/src/curation.ts` is a placeholder until then), sync sources as encrypted NIP-78 app data, and show games a list holds only as `r` URLs.
 - Curator verification: NIP-32 labels for sign-in and depth, and flagging key-shaped input fields in game windows.
-- Presence (NIP-38 status, friends only by default via a circle key), friends and the friends list.
+- A private friends list (NIP-51 follow set) as an alternative to all follows, and keeping the circle key in the keychain instead of local storage.
 - Monthly budget: play-time metering in Rust (any running time counts) and month-end zaps over NWC.
 - `nip44` in the shim, per-kind scopes from the listing's `k` tags, guest keys per game.
 - Native games on desktop through a built-in NIP-46 bunker, Windows and Linux key stores, and mobile.

@@ -1,6 +1,9 @@
 import { SimplePool } from "nostr-tools/pool";
+import type { Filter } from "nostr-tools/filter";
+import type { Event } from "nostr-tools/pure";
 import { listsFor, type CuratorList, type ListRef } from "./curation";
 import { lastUpdated, parseListings, type Game } from "./listing";
+import type { Friend } from "./presence";
 
 const RELAYS = [
   "wss://relay.damus.io",
@@ -43,6 +46,35 @@ export async function fetchListings(coordinates: string[]): Promise<Game[]> {
   );
   return parseListings(events, true).filter((g) => coordinates.includes(g.coordinate));
 }
+
+export async function fetchFriends(pubkey: string): Promise<Friend[]> {
+  const [contacts] = (
+    await pool.querySync(RELAYS, { kinds: [3], authors: [pubkey] }, { maxWait: 4000 })
+  ).sort((a, b) => b.created_at - a.created_at);
+  const follows = [
+    ...new Set(contacts?.tags.filter((t) => t[0] === "p" && t[1]).map((t) => t[1]!)),
+  ];
+  if (!follows.length) return [];
+  const profiles = new Map<string, Event>();
+  for (const e of await pool.querySync(RELAYS, { kinds: [0], authors: follows }, { maxWait: 4000 }))
+    if ((profiles.get(e.pubkey)?.created_at ?? 0) < e.created_at) profiles.set(e.pubkey, e);
+  return follows.map((pubkey) => {
+    try {
+      const { name, display_name, picture } = JSON.parse(profiles.get(pubkey)?.content ?? "{}");
+      return { pubkey, name: display_name || name || undefined, picture: picture || undefined };
+    } catch {
+      return { pubkey };
+    }
+  });
+}
+
+export const subscribe = (filter: Filter, onevent: (event: Event) => void) => {
+  const sub = pool.subscribeMany(RELAYS, filter, { onevent });
+  return () => sub.close();
+};
+
+export const publish = async (event: Event) =>
+  void (await Promise.any(pool.publish(RELAYS, event)));
 
 async function github(repo: string, path: string, field: string): Promise<number | undefined> {
   const res = await fetch(`https://api.github.com/repos/${repo}${path}`).catch(() => undefined);

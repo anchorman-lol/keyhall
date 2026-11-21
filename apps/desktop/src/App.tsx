@@ -1,8 +1,10 @@
 import { Button } from "@keyhall/ui/components/button";
-import { KeyholeIcon } from "@phosphor-icons/react";
+import { GearIcon, KeyholeIcon } from "@phosphor-icons/react";
+import { FriendsPanel } from "./Friends.tsx";
+import { PresenceSettings } from "./PresenceSettings.tsx";
 import { GamePage } from "./GamePage.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
-import { findGame, library, type ShimCall } from "@keyhall/core/launcher";
+import { findGame, library, playing, type ShimCall } from "@keyhall/core/launcher";
 import { Launcher } from "./launcher.ts";
 import { Library } from "./Library.tsx";
 import { SignerLog } from "./SignerLog.tsx";
@@ -14,7 +16,8 @@ const heading =
 
 export function App() {
   const context = Launcher.useSelector((s) => s.context);
-  const { current, npub, calls } = context;
+  const { current, npub, calls, settings } = context;
+  const active = playing(context).length;
   const { send } = Launcher.useActorRef();
   const gameName = (c: ShimCall) => findGame(context, c.coordinate)?.name ?? "";
   return (
@@ -25,21 +28,35 @@ export function App() {
           Keyhall
         </div>
         <Button
-          variant={current ? "ghost" : "secondary"}
+          variant={current || settings ? "ghost" : "secondary"}
           className="w-full justify-between"
           onClick={() => send({ type: "select" })}
         >
           All games
           <span className="text-muted-foreground">{library(context).length}</span>
         </Button>
+        <h2 className={`${heading} flex justify-between`}>
+          Friends {active > 0 && <span className="text-primary">{active} playing</span>}
+        </h2>
+        <FriendsPanel />
         <h2 className={heading}>Sources</h2>
         <Sources />
         <h2 className={heading}>Signer activity</h2>
         <SignerLog calls={calls.slice(-6).reverse()} name={gameName} />
+        <Button
+          variant={settings ? "secondary" : "ghost"}
+          className="mt-6 w-full justify-start"
+          onClick={() => send({ type: "settings" })}
+        >
+          <GearIcon data-icon="inline-start" />
+          Presence settings
+        </Button>
       </aside>
       <main className="overflow-y-auto">
         <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background px-7 py-3 text-sm text-muted-foreground">
-          <span>Library{current && ` / ${current.name}`}</span>
+          <span>
+            {settings ? "Settings / Presence" : `Library${current ? ` / ${current.name}` : ""}`}
+          </span>
           {npub ? (
             <span className="font-mono text-foreground">
               {npub.slice(0, 10)}…{npub.slice(-4)}
@@ -49,7 +66,7 @@ export function App() {
           )}
         </header>
         <section className="px-7 pt-5 pb-10">
-          {current ? <GamePage game={current} /> : <Library />}
+          {settings ? <PresenceSettings /> : current ? <GamePage game={current} /> : <Library />}
         </section>
       </main>
       <SignRequest />

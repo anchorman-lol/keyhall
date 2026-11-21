@@ -5,10 +5,14 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use nostr::prelude::{Event, Keys, ToBech32};
+use nostr::nips::nip44;
+use nostr::prelude::{Event, Keys, PublicKey, ToBech32};
 use serde_json::json;
 use tauri::ipc::CapabilityBuilder;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
+};
 use tokio::sync::oneshot;
 use url::Url;
 
@@ -151,16 +155,23 @@ fn open_game(
         label.clone(),
         Game {
             name: name.clone(),
-            coordinate,
+            coordinate: coordinate.clone(),
         },
     );
     let parsed = url.parse().map_err(|e: url::ParseError| e.to_string())?;
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
+    let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
         .title(&name)
         .inner_size(1100.0, 760.0)
         .initialization_script(&shim)
         .build()
         .map_err(|e| e.to_string())?;
+    let closed = label.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::Destroyed = event {
+            app.state::<Launcher>().games.lock().unwrap().remove(&closed);
+            let _ = app.emit_to("main", "closed", json!({"coordinate": coordinate}));
+        }
+    });
     Ok(label)
 }
 
@@ -179,6 +190,29 @@ fn answer_sign_request(state: State<Launcher>, id: u64, allow: bool) {
     if let Some(reply) = state.pending.lock().unwrap().remove(&id) {
         let _ = reply.send(allow);
     }
+}
+
+#[tauri::command]
+async fn sign_event(app: AppHandle, event: EventRequest) -> Result<Event, String> {
+    let keys = keychain_task(app, Launcher::keys).await?;
+    signer::sign_for_launcher(&keys, &event)
+}
+
+fn peer(pubkey: &str) -> Result<PublicKey, String> {
+    PublicKey::from_hex(pubkey).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn nip44_encrypt(app: AppHandle, pubkey: String, text: String) -> Result<String, String> {
+    let keys = keychain_task(app, Launcher::keys).await?;
+    nip44::encrypt(keys.secret_key(), &peer(&pubkey)?, text, nip44::Version::V2)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn nip44_decrypt(app: AppHandle, pubkey: String, text: String) -> Result<String, String> {
+    let keys = keychain_task(app, Launcher::keys).await?;
+    nip44::decrypt(keys.secret_key(), &peer(&pubkey)?, text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -255,6 +289,9 @@ pub fn run() {
             open_game,
             check_game,
             answer_sign_request,
+            sign_event,
+            nip44_encrypt,
+            nip44_decrypt,
             nostr_get_public_key,
             nostr_sign_event,
             nostr_observe

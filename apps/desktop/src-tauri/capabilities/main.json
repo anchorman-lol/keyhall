@@ -10,6 +10,9 @@
     "allow-import-key",
     "allow-open-game",
     "allow-check-game",
-    "allow-answer-sign-request"
+    "allow-answer-sign-request",
+    "allow-sign-event",
+    "allow-nip44-encrypt",
+    "allow-nip44-decrypt"
   ]
 }
