@@ -8,7 +8,7 @@ Early work in progress: this is v0, desktop (macOS) first.
 
 ## What v0 does
 
-- Lists games from relays: plain NIP-89 handler events (kind 31990) tagged `t=game` or `t=games`.
+- Lists games from the sources you switch on in the sidebar. “Keyhall picks”, the official list (NIP-51 app curation set, kind 30267, `d=games-default` under the project's key), is on by default. Add a curator by npub (all their lists tagged `t=games`) or one list by naddr. “Unvetted listings”, off by default, adds every NIP-89 handler event (kind 31990) tagged `t=game` or `t=games`. Each game shows which sources list it, and your sources are kept in local storage.
 - Shows a sign-in badge from the listing's `auth` tags (worst case wins), a Nostr depth badge (`multiplayer`, `identity` or `none`) and when the game was last updated.
 - Opens each web game in its own window with an injected `window.nostr` (`getPublicKey`, `signEvent`). Rust answers both. The first time a game asks to sign an event kind, the launcher window asks you to allow it; game windows can't answer that prompt.
 - Keeps your key in the macOS keychain. Create one or import an nsec; it stays in the Rust process.
@@ -32,7 +32,7 @@ Each game window gets a capability added at runtime, scoped to that window and t
 A pnpm workspace:
 
 - `apps/desktop`: the Tauri 2 app, a React UI and the Rust host (`src-tauri`: keychain, signer, game windows).
-- `packages/core`: listing parsing, badges, depth classification, the `window.nostr` shim, relay queries and the launcher's XState machine (key setup, library, game windows, signing approvals).
+- `packages/core`: listing and curator-list parsing (`curation.ts`), source settings and their union (`sources.ts`), badges, depth classification, the `window.nostr` shim, relay queries and the launcher's XState machine (key setup, library, game windows, signing approvals).
 - `packages/ui`: shadcn components (Base UI, Phosphor icons) and the Tailwind theme.
 
 ```sh
@@ -48,7 +48,7 @@ Unsigned builds change their code signature on every rebuild, so macOS asks for 
 
 ## Next steps
 
-- Keyhall picks: the official default list (NIP-51 kind 30267 under the project's key), the Sources sidebar, curator lists and unvetted listings behind a toggle.
+- Publish Keyhall picks under the project's key (`PICKS_PUBKEY` in `packages/core/src/curation.ts` is a placeholder until then), sync sources as encrypted NIP-78 app data, and show games a list holds only as `r` URLs.
 - Curator verification: NIP-32 labels for sign-in and depth, and flagging key-shaped input fields in game windows.
 - Presence (NIP-38 status, friends only by default via a circle key), friends and the friends list.
 - Monthly budget: play-time metering in Rust (any running time counts) and month-end zaps over NWC.

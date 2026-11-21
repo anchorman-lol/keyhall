@@ -1,4 +1,4 @@
-import { depthOf, updatedAt } from "@keyhall/core/launcher";
+import { depthOf, library, sourceLabel, updatedAt } from "@keyhall/core/launcher";
 import type { Game } from "@keyhall/core/listing";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@keyhall/ui/components/empty";
 import { DepthBadge, SignInBadge } from "./badges.tsx";
@@ -18,13 +18,17 @@ export function Cover({ game, className }: { game: Game; className: string }) {
 export function Library() {
   const context = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
-  const { games } = context;
-  if (!games?.length)
+  const entries = library(context);
+  if (!entries.length)
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>{games ? "No games found" : "Looking for games on relays…"}</EmptyTitle>
-          <EmptyDescription>Games are NIP-89 listings tagged “game” or “games”.</EmptyDescription>
+          <EmptyTitle>
+            {context.loading.length ? "Looking for games on relays…" : "No games in your sources"}
+          </EmptyTitle>
+          <EmptyDescription>
+            Switch on a source, add a curator's list or show unvetted listings.
+          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -32,7 +36,7 @@ export function Library() {
     <>
       <h1 className="mb-5 text-2xl font-semibold">All games</h1>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-5">
-        {games.map((game) => {
+        {entries.map(({ game, from }) => {
           const { depth, verified } = depthOf(context, game);
           return (
             <button
@@ -45,6 +49,9 @@ export function Library() {
                 <strong className="truncate">{game.name}</strong>
                 <span className="text-xs text-muted-foreground">
                   Updated {formatDate(updatedAt(context, game))}
+                </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {from.map((id) => sourceLabel(context, id)).join(" · ")}
                 </span>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   <SignInBadge signIn={game.signIn} />

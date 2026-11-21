@@ -1,21 +1,22 @@
-import { Badge } from "@keyhall/ui/components/badge";
 import { Button } from "@keyhall/ui/components/button";
 import { KeyholeIcon } from "@phosphor-icons/react";
 import { GamePage } from "./GamePage.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
-import type { ShimCall } from "@keyhall/core/launcher";
+import { findGame, library, type ShimCall } from "@keyhall/core/launcher";
 import { Launcher } from "./launcher.ts";
 import { Library } from "./Library.tsx";
 import { SignerLog } from "./SignerLog.tsx";
+import { Sources } from "./Sources.tsx";
 import { SignRequest } from "./SignRequest.tsx";
 
 const heading =
   "mx-2 mt-7 mb-2 text-[11px] font-semibold tracking-widest text-muted-foreground uppercase";
 
 export function App() {
-  const { games, current, npub, calls } = Launcher.useSelector((s) => s.context);
+  const context = Launcher.useSelector((s) => s.context);
+  const { current, npub, calls } = context;
   const { send } = Launcher.useActorRef();
-  const gameName = (c: ShimCall) => games?.find((g) => g.coordinate === c.coordinate)?.name ?? "";
+  const gameName = (c: ShimCall) => findGame(context, c.coordinate)?.name ?? "";
   return (
     <div className="grid h-screen grid-cols-[230px_1fr]">
       <aside className="overflow-y-auto border-r bg-sidebar px-3 py-5">
@@ -29,12 +30,10 @@ export function App() {
           onClick={() => send({ type: "select" })}
         >
           All games
-          <span className="text-muted-foreground">{games?.length ?? ""}</span>
+          <span className="text-muted-foreground">{library(context).length}</span>
         </Button>
         <h2 className={heading}>Sources</h2>
-        <div className="flex items-center justify-between px-3 text-sm">
-          All game listings <Badge variant="outline">relays</Badge>
-        </div>
+        <Sources />
         <h2 className={heading}>Signer activity</h2>
         <SignerLog calls={calls.slice(-6).reverse()} name={gameName} />
       </aside>
