@@ -1,5 +1,6 @@
 import { launcherMachine, type ShimCall, type SignRequest } from "@keyhall/core/launcher";
-import { fetchGames, fetchLastUpdated } from "@keyhall/core/relays";
+import { fetchGames, fetchLastUpdated, fetchListings, fetchLists } from "@keyhall/core/relays";
+import { loadSources } from "@keyhall/core/sources";
 import { shimScript } from "@keyhall/core/shim";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -16,6 +17,8 @@ const machine = launcherMachine(
   {
     keyStatus: () => invoke("key_status"),
     saveKey: (command, nsec) => invoke(command, { nsec }),
+    fetchLists,
+    fetchListings,
     fetchGames,
     fetchLastUpdated,
     openGame: (game) =>
@@ -40,8 +43,10 @@ const machine = launcherMachine(
       return () => subscriptions.forEach((s) => s.then((unlisten) => unlisten()));
     },
     saveObserved: (observed) => localStorage.setItem("observed", JSON.stringify(observed)),
+    saveSources: (sources) => localStorage.setItem("sources", JSON.stringify(sources)),
   },
   JSON.parse(localStorage.getItem("observed") ?? "{}"),
+  loadSources(JSON.parse(localStorage.getItem("sources") ?? "null")),
 );
 
 export const Launcher = createActorContext(machine);

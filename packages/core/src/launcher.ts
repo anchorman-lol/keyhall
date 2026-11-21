@@ -1,8 +1,20 @@
-import { decode } from "nostr-tools/nip19";
+import { decode, npubEncode } from "nostr-tools/nip19";
 import { verifyEvent, type Event } from "nostr-tools/pure";
 import { assign, enqueueActions, fromCallback, fromPromise, setup } from "xstate";
+import { parseListRef, PICKS, type CuratorList, type ListRef } from "./curation";
 import { classifyDepth, resolveDepth, type Observation } from "./depth";
 import type { Game } from "./listing";
+import {
+  addCurator,
+  PICKS_ID,
+  removeCurator,
+  sourceList,
+  toggleSource,
+  union,
+  UNVETTED_ID,
+  type Source,
+  type SourceSettings,
+} from "./sources";
 
 export interface ShimCall {
   coordinate: string;
@@ -27,7 +39,10 @@ type KeyCommand = "generate_key" | "import_key";
 export interface LauncherDeps {
   keyStatus(): Promise<string | null>;
   saveKey(command: KeyCommand, nsec?: string): Promise<string>;
+  fetchLists(ref: ListRef): Promise<CuratorList[]>;
+  fetchListings(coordinates: string[]): Promise<Game[]>;
   fetchGames(): Promise<Game[]>;
+  saveSources(sources: SourceSettings): void;
   fetchLastUpdated(game: Game): Promise<number>;
   openGame(game: Game): Promise<string>;
   checkGame(label: string): void;
@@ -36,8 +51,17 @@ export interface LauncherDeps {
   saveObserved(observed: Record<string, Observation>): void;
 }
 
+export interface Fetched {
+  lists: CuratorList[];
+  games: string[];
+}
+
 export interface LauncherContext {
-  games?: Game[];
+  sources: SourceSettings;
+  sourceError: string;
+  fetched: Record<string, Fetched>;
+  listings: Record<string, Game>;
+  loading: string[];
   updated: Record<string, number>;
   npub: string | null;
   keyError: string;
@@ -57,8 +81,11 @@ type Events =
   | { type: "opened"; coordinate: string; label: string }
   | { type: "check"; game: Game }
   | { type: "answer"; allow: boolean }
-  | { type: "updated"; coordinate: string; time: number }
-  | { type: "dated" };
+  | { type: "source.toggle"; id: string }
+  | { type: "source.add"; input: string }
+  | { type: "source.remove"; id: string }
+  | { type: "source.loaded"; id: string; lists: CuratorList[]; games: Game[] }
+  | { type: "updated"; coordinate: string; time: number };
 
 const record = (
   context: LauncherContext,
@@ -68,6 +95,38 @@ const record = (
   ...context.observed,
   [coordinate]: update(context.observed[coordinate] ?? { kinds: [], signer: false }),
 });
+
+export const findGame = (context: LauncherContext, coordinate: string) =>
+  context.listings[coordinate];
+
+const sourceGames = (context: LauncherContext, id: string) =>
+  (context.fetched[id]?.games ?? []).flatMap((c) => context.listings[c] ?? []);
+
+export const sourceCount = (context: LauncherContext, id: string) =>
+  context.fetched[id] && sourceGames(context, id).length;
+
+export function sourceLabel(context: LauncherContext, id: string) {
+  if (id === PICKS_ID) return PICKS;
+  if (id === UNVETTED_ID) return "Unvetted listings";
+  const titles = context.fetched[id]?.lists.map((l) => l.title).join(" · ");
+  const ref = sourceList(context.sources).find((s) => s.id === id)?.ref;
+  const npub = ref ? npubEncode(ref.pubkey) : id;
+  return titles || `${npub.slice(0, 10)}…${npub.slice(-4)}`;
+}
+
+export const library = (context: LauncherContext) => {
+  const sources = sourceList(context.sources);
+  return union(
+    sources,
+    Object.fromEntries(sources.map(({ id }) => [id, sourceGames(context, id)])),
+  );
+};
+
+async function fetchSource({ ref }: Source, deps: LauncherDeps) {
+  if (!ref) return { lists: [], games: await deps.fetchGames() };
+  const lists = await deps.fetchLists(ref);
+  return { lists, games: await deps.fetchListings([...new Set(lists.flatMap((l) => l.games))]) };
+}
 
 export const updatedAt = (context: LauncherContext, game: Game) =>
   context.updated[game.coordinate] ?? game.createdAt;
@@ -80,7 +139,11 @@ export function depthOf(context: LauncherContext, game: Game) {
   return resolveDepth(game.depth, seen && classifyDepth(seen));
 }
 
-export const launcherMachine = (deps: LauncherDeps, observed: Record<string, Observation>) =>
+export const launcherMachine = (
+  deps: LauncherDeps,
+  observed: Record<string, Observation>,
+  sources: SourceSettings,
+) =>
   setup({
     types: {} as { context: LauncherContext; events: Events },
     actors: {
@@ -89,7 +152,11 @@ export const launcherMachine = (deps: LauncherDeps, observed: Record<string, Obs
       saveKey: fromPromise<string, { command: KeyCommand; nsec?: string }>(({ input }) =>
         deps.saveKey(input.command, input.nsec),
       ),
-      fetchGames: fromPromise(() => deps.fetchGames()),
+      fetchSource: fromCallback<Events, Source>(({ input, sendBack }) => {
+        void fetchSource(input, deps)
+          .catch(() => ({ lists: [], games: [] }))
+          .then((result) => sendBack({ type: "source.loaded", id: input.id, ...result }));
+      }),
       fetchUpdates: fromCallback<Events, Game[]>(({ input, sendBack }) => {
         void (async () => {
           for (const game of input) {
@@ -99,7 +166,6 @@ export const launcherMachine = (deps: LauncherDeps, observed: Record<string, Obs
               time: await deps.fetchLastUpdated(game),
             });
           }
-          sendBack({ type: "dated" });
         })();
       }),
       openGame: fromCallback<Events, Game>(({ input, sendBack }) => {
@@ -110,11 +176,24 @@ export const launcherMachine = (deps: LauncherDeps, observed: Record<string, Obs
     },
     actions: {
       saveObserved: ({ context }) => deps.saveObserved(context.observed),
+      saveSources: ({ context }) => deps.saveSources(context.sources),
+      fetchSources: enqueueActions(({ context, enqueue }) => {
+        const wanted = sourceList(context.sources).filter(
+          (s) => s.enabled && !context.fetched[s.id] && !context.loading.includes(s.id),
+        );
+        for (const source of wanted) enqueue.spawnChild("fetchSource", { input: source });
+        enqueue.assign({ loading: [...context.loading, ...wanted.map((s) => s.id)] });
+      }),
     },
   }).createMachine({
     id: "launcher",
     type: "parallel",
     context: {
+      sources,
+      sourceError: "",
+      fetched: {},
+      listings: {},
+      loading: [],
       updated: {},
       npub: null,
       keyError: "",
@@ -124,7 +203,55 @@ export const launcherMachine = (deps: LauncherDeps, observed: Record<string, Obs
       requests: [],
     },
     invoke: { src: "listen" },
+    entry: "fetchSources",
     on: {
+      "source.toggle": {
+        actions: [
+          assign({ sources: ({ context, event }) => toggleSource(context.sources, event.id) }),
+          "saveSources",
+          "fetchSources",
+        ],
+      },
+      "source.add": {
+        actions: [
+          assign(({ context, event }) => {
+            const ref = parseListRef(event.input);
+            return ref
+              ? { sources: addCurator(context.sources, ref), sourceError: "" }
+              : { sourceError: "Paste a curator's npub or a list's naddr." };
+          }),
+          "saveSources",
+          "fetchSources",
+        ],
+      },
+      "source.remove": {
+        actions: [
+          assign({ sources: ({ context, event }) => removeCurator(context.sources, event.id) }),
+          "saveSources",
+        ],
+      },
+      "source.loaded": {
+        actions: enqueueActions(({ context, event, enqueue }) => {
+          const fresh = event.games.filter((g) => !context.listings[g.coordinate]);
+          enqueue.assign({
+            loading: context.loading.filter((id) => id !== event.id),
+            fetched: {
+              ...context.fetched,
+              [event.id]: { lists: event.lists, games: event.games.map((g) => g.coordinate) },
+            },
+            listings: {
+              ...context.listings,
+              ...Object.fromEntries(event.games.map((g) => [g.coordinate, g])),
+            },
+          });
+          if (fresh.length) enqueue.spawnChild("fetchUpdates", { input: fresh });
+        }),
+      },
+      updated: {
+        actions: assign({
+          updated: ({ context, event }) => ({ ...context.updated, [event.coordinate]: event.time }),
+        }),
+      },
       select: { actions: assign({ current: ({ event }) => event.game }) },
       play: {
         actions: enqueueActions(({ enqueue, event }) =>
@@ -175,32 +302,6 @@ export const launcherMachine = (deps: LauncherDeps, observed: Record<string, Obs
       },
     },
     states: {
-      library: {
-        initial: "loading",
-        states: {
-          loading: {
-            invoke: {
-              src: "fetchGames",
-              onDone: { target: "dating", actions: assign({ games: ({ event }) => event.output }) },
-            },
-          },
-          dating: {
-            invoke: { src: "fetchUpdates", input: ({ context }) => context.games ?? [] },
-            on: {
-              updated: {
-                actions: assign({
-                  updated: ({ context, event }) => ({
-                    ...context.updated,
-                    [event.coordinate]: event.time,
-                  }),
-                }),
-              },
-              dated: "ready",
-            },
-          },
-          ready: {},
-        },
-      },
       key: {
         initial: "checking",
         states: {

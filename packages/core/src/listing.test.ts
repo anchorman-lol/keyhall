@@ -56,7 +56,7 @@ describe("parseListings", () => {
     expect(parseListings([game])).toHaveLength(1);
   });
 
-  it("skips listings that are not games, not 31990 or have no https url", () => {
+  it("skips listings that are not games (unless curated), not 31990 or have no https url", () => {
     const notGame = listing({
       tags: [
         ["d", "x"],
@@ -80,6 +80,9 @@ describe("parseListings", () => {
       ],
     });
     expect(parseListings([notGame, noUrl, httpOnly, { ...listing(), kind: 1 }])).toEqual([]);
+    expect(parseListings([notGame], true).map((g) => g.coordinate)).toEqual([
+      `31990:${"a".repeat(64)}:x`,
+    ]);
   });
 
   it("falls back to the web tag with the placeholder removed", () => {

@@ -2,8 +2,18 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure
 import { npubEncode } from "nostr-tools/nip19";
 import { describe, expect, it, vi } from "vitest";
 import { createActor, waitFor } from "xstate";
-import { depthOf, launcherMachine, type LauncherDeps, type LauncherEvent } from "./launcher";
+import { PICKS_REF, type CuratorList, type ListRef } from "./curation";
+import {
+  depthOf,
+  findGame,
+  launcherMachine,
+  library,
+  sourceLabel,
+  type LauncherDeps,
+  type LauncherEvent,
+} from "./launcher";
 import type { Game } from "./listing";
+import { defaultSources, PICKS_ID, UNVETTED_ID, type SourceSettings } from "./sources";
 
 const secret = generateSecretKey();
 const npub = npubEncode(getPublicKey(secret));
@@ -11,13 +21,31 @@ const signed = (key = secret) =>
   finalizeEvent({ kind: 1, content: "hi", tags: [], created_at: 1 }, key);
 
 const game = { coordinate: "31990:abc:blockstr", name: "Blockstr", createdAt: 100 } as Game;
+const spam = { coordinate: "31990:def:spam", name: "Spam", createdAt: 100 } as Game;
+const curatorKey = getPublicKey(generateSecretKey());
+const listOf = (ref: ListRef, games: Game[]): CuratorList => ({
+  address: `30267:${ref.pubkey}:${ref.d ?? "games"}`,
+  pubkey: ref.pubkey,
+  title: "A list",
+  description: undefined,
+  image: undefined,
+  games: games.map((g) => g.coordinate),
+});
+const relays: Record<string, Game[]> = {
+  [PICKS_REF.pubkey]: [game],
+  [curatorKey]: [game, spam],
+};
 
-function start(deps: Partial<LauncherDeps> = {}) {
+function start(deps: Partial<LauncherDeps> = {}, sources: SourceSettings = defaultSources) {
   let emit: (event: LauncherEvent) => void = () => {};
   const all: LauncherDeps = {
     keyStatus: async () => null,
     saveKey: async () => npub,
-    fetchGames: async () => [game],
+    fetchLists: async (ref) => [listOf(ref, relays[ref.pubkey] ?? [])],
+    fetchListings: async (coordinates) =>
+      [game, spam].filter((g) => coordinates.includes(g.coordinate)),
+    fetchGames: async () => [game, spam],
+    saveSources: vi.fn(),
     fetchLastUpdated: async () => 200,
     openGame: async () => "game-1",
     checkGame: vi.fn(),
@@ -29,7 +57,7 @@ function start(deps: Partial<LauncherDeps> = {}) {
     saveObserved: vi.fn(),
     ...deps,
   };
-  const actor = createActor(launcherMachine(all, {})).start();
+  const actor = createActor(launcherMachine(all, {}, sources)).start();
   return { actor, deps: all, emit: (e: LauncherEvent) => emit(e) };
 }
 
@@ -72,19 +100,87 @@ describe("key", () => {
 });
 
 describe("library", () => {
-  it("loads while the key check waits on a keychain prompt", async () => {
-    const { actor } = start({ keyStatus: () => new Promise(() => {}) });
-    await waitFor(actor, (s) => s.matches({ library: "ready" }));
-    expect(actor.getSnapshot().context.games).toEqual([game]);
+  const loaded = (s: { context: { loading: string[] } }) => s.context.loading.length === 0;
+
+  it("loads Keyhall picks while the key check waits on a keychain prompt", async () => {
+    const fetchGames = vi.fn(async () => [game, spam]);
+    const { actor } = start({ keyStatus: () => new Promise(() => {}), fetchGames });
+    await waitFor(actor, loaded);
+    expect(library(actor.getSnapshot().context)).toEqual([{ game, from: [PICKS_ID] }]);
     expect(actor.getSnapshot().matches({ key: "checking" })).toBe(true);
+    expect(fetchGames).not.toHaveBeenCalled();
   });
 
   it("loads games, then their last-updated times", async () => {
     const { actor } = start();
-    await waitFor(actor, (s) => s.matches({ library: "ready" }));
-    const { games, updated } = actor.getSnapshot().context;
-    expect(games).toEqual([game]);
-    expect(updated).toEqual({ [game.coordinate]: 200 });
+    await waitFor(actor, (s) => s.context.updated[game.coordinate] !== undefined);
+    expect(actor.getSnapshot().context.updated).toEqual({ [game.coordinate]: 200 });
+  });
+
+  it("shows unvetted listings once switched on, and saves the choice", async () => {
+    const { actor, deps } = start();
+    await waitFor(actor, loaded);
+    actor.send({ type: "source.toggle", id: UNVETTED_ID });
+    await waitFor(actor, loaded);
+    expect(library(actor.getSnapshot().context)).toEqual([
+      { game, from: [PICKS_ID, UNVETTED_ID] },
+      { game: spam, from: [UNVETTED_ID] },
+    ]);
+    expect(deps.saveSources).toHaveBeenLastCalledWith({ ...defaultSources, unvetted: true });
+  });
+
+  it("hides Keyhall picks when switched off, without fetching again when back on", async () => {
+    const fetchLists = vi.fn(async (ref: ListRef) => [listOf(ref, [game])]);
+    const { actor } = start({ fetchLists });
+    await waitFor(actor, loaded);
+    actor.send({ type: "source.toggle", id: PICKS_ID });
+    expect(library(actor.getSnapshot().context)).toEqual([]);
+    expect(findGame(actor.getSnapshot().context, game.coordinate)).toBe(game);
+    actor.send({ type: "source.toggle", id: PICKS_ID });
+    expect(library(actor.getSnapshot().context)).toEqual([{ game, from: [PICKS_ID] }]);
+    expect(fetchLists).toHaveBeenCalledOnce();
+  });
+
+  it("adds a curator by npub, loads their lists and can remove them", async () => {
+    const { actor, deps } = start();
+    await waitFor(actor, loaded);
+    actor.send({ type: "source.add", input: npubEncode(curatorKey) });
+    await waitFor(actor, loaded);
+    expect(library(actor.getSnapshot().context)).toEqual([
+      { game, from: [PICKS_ID, curatorKey] },
+      { game: spam, from: [curatorKey] },
+    ]);
+    const { context } = actor.getSnapshot();
+    expect([PICKS_ID, curatorKey, UNVETTED_ID].map((id) => sourceLabel(context, id))).toEqual([
+      "Keyhall picks",
+      "A list",
+      "Unvetted listings",
+    ]);
+    expect(deps.saveSources).toHaveBeenLastCalledWith({
+      ...defaultSources,
+      curators: [{ ref: { pubkey: curatorKey }, enabled: true }],
+    });
+    actor.send({ type: "source.remove", id: curatorKey });
+    expect(library(actor.getSnapshot().context)).toEqual([{ game, from: [PICKS_ID] }]);
+  });
+
+  it("loads saved curators on start and rejects input that isn't an npub or naddr", async () => {
+    const { actor } = start(
+      {},
+      { picks: false, unvetted: false, curators: [{ ref: { pubkey: curatorKey }, enabled: true }] },
+    );
+    await waitFor(actor, loaded);
+    expect(library(actor.getSnapshot().context).map((e) => e.game)).toEqual([game, spam]);
+    actor.send({ type: "source.add", input: "nsec1nope" });
+    expect(actor.getSnapshot().context.sourceError).toMatch(/npub or a list.s naddr/);
+    actor.send({ type: "source.add", input: npubEncode(curatorKey) });
+    expect(actor.getSnapshot().context.sourceError).toBe("");
+  });
+
+  it("treats a source whose relays fail as empty", async () => {
+    const { actor } = start({ fetchLists: () => Promise.reject(new Error("offline")) });
+    await waitFor(actor, loaded);
+    expect(library(actor.getSnapshot().context)).toEqual([]);
   });
 
   it("selects a game and goes back to all games", () => {

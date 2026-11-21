@@ -43,7 +43,7 @@ export function lastUpdated(...times: (number | undefined)[]): number {
   return Math.max(...times.filter((t) => t !== undefined));
 }
 
-const tag = (e: NostrEvent, name: string) => e.tags.find((t) => t[0] === name)?.[1];
+export const tag = (e: NostrEvent, name: string) => e.tags.find((t) => t[0] === name)?.[1];
 const https = (url: unknown) =>
   typeof url === "string" && url.startsWith("https://") ? url : undefined;
 
@@ -56,10 +56,12 @@ function metadata(content: string): Record<string, unknown> {
   }
 }
 
-function parseListing(e: NostrEvent): Game | undefined {
+export const isGame = (e: NostrEvent) =>
+  e.tags.some((t) => t[0] === "t" && /^games?$/i.test(t[1] ?? ""));
+
+function parseListing(e: NostrEvent, curated: boolean): Game | undefined {
   const d = tag(e, "d");
-  const isGame = e.tags.some((t) => t[0] === "t" && /^games?$/i.test(t[1] ?? ""));
-  if (e.kind !== 31990 || d === undefined || !isGame) return undefined;
+  if (e.kind !== 31990 || d === undefined || !(curated || isGame(e))) return undefined;
   const meta = metadata(e.content);
   const url = https(meta.website) ?? https(tag(e, "web")?.replace("<bech32>", ""));
   if (!url) return undefined;
@@ -83,10 +85,10 @@ function parseListing(e: NostrEvent): Game | undefined {
   };
 }
 
-export function parseListings(events: NostrEvent[]): Game[] {
+export function parseListings(events: NostrEvent[], curated = false): Game[] {
   const newest = new Map<string, Game>();
   for (const e of events) {
-    const game = parseListing(e);
+    const game = parseListing(e, curated);
     const seen = game && newest.get(game.coordinate);
     if (game && (!seen || seen.createdAt < game.createdAt)) newest.set(game.coordinate, game);
   }
