@@ -1,7 +1,6 @@
 import { cn } from "@keyhall/ui/lib/utils";
-import { KeyholeIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { cover, friendsIn, type Friend, type Game } from "./data.ts";
+import { cover, type Friend, type Game } from "./data.ts";
 
 export function Window({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -23,20 +22,6 @@ export function TrafficLights({ className }: { className?: string }) {
       <span className="size-3 rounded-full bg-[#febc2e]" />
       <span className="size-3 rounded-full bg-[#28c840]" />
     </div>
-  );
-}
-
-export function Wordmark({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "flex items-center gap-1.5 text-[15px] font-semibold tracking-[-0.01em]",
-        className,
-      )}
-    >
-      <KeyholeIcon weight="fill" className="size-5 text-primary" />
-      Keyhall
-    </span>
   );
 }
 
@@ -109,55 +94,6 @@ export function Live({ className }: { className?: string }) {
       <span className="absolute inset-0 animate-ping rounded-full bg-online/60 motion-reduce:hidden" />
       <span className="relative size-2 rounded-full bg-online" />
     </span>
-  );
-}
-
-export function Tile({
-  game,
-  running,
-  className,
-  meta,
-}: {
-  game: Game;
-  running?: boolean;
-  className?: string;
-  meta?: ReactNode;
-}) {
-  const here = friendsIn(game.id);
-  return (
-    <button className={cn("group flex min-w-0 flex-col gap-2 text-left outline-none", className)}>
-      <span className="relative overflow-hidden rounded-lg ring-1 ring-white/[0.06] transition group-hover:ring-2 group-hover:ring-primary/70 group-focus-visible:ring-2 group-focus-visible:ring-primary">
-        <Cover
-          game={game}
-          className="aspect-[16/10] w-full transition duration-300 group-hover:scale-[1.03] motion-reduce:transition-none"
-        />
-        {running && (
-          <span className="absolute top-2 left-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
-            <Live className="size-1.5" /> Running
-          </span>
-        )}
-      </span>
-      <span className="flex items-start justify-between gap-2 px-0.5">
-        <span className="min-w-0">
-          <span className="block truncate text-[13px] font-medium">{game.name}</span>
-          <span className="block truncate text-[12px] text-muted-foreground">
-            {meta ?? game.genre}
-          </span>
-        </span>
-        {here.length > 0 && (
-          <span className="flex -space-x-1.5 pt-0.5">
-            {here.map((f) => (
-              <Avatar
-                key={f.handle}
-                person={f}
-                size="xs"
-                className="ring-2 ring-background rounded-full"
-              />
-            ))}
-          </span>
-        )}
-      </span>
-    </button>
   );
 }
 

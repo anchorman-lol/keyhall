@@ -389,7 +389,6 @@ export const SOURCES: Source[] = [
 export const source = (id: SourceId) => SOURCES.find((s) => s.id === id)!;
 export const UNVETTED = 137;
 
-export const LIBRARY = GAMES.filter((g) => source(g.source).on);
 export const gamesIn = (id: SourceId) => GAMES.filter((g) => g.source === id);
 
 export type Friend = {
@@ -460,6 +459,22 @@ export const SIGNATURES: Signature[] = [
   { game: "neonsentinel", what: "Run replay", kind: "30078", ago: "4 min", ok: true },
   { game: "neonsentinel", what: "Score 9,410", kind: "30762", ago: "11 min", ok: true },
   { game: "nochess", what: "Finished game, PGN", kind: "64", ago: "1 h", ok: true },
+  { game: "nochess", what: "Move 31, Qxf7+", kind: "30064", ago: "1 h", ok: true },
+  {
+    game: "forgerealms",
+    what: "Trade route to Ashford",
+    kind: "31337",
+    ago: "Yesterday",
+    ok: true,
+  },
+  {
+    game: "forgerealms",
+    what: "Village moves, 42 events",
+    kind: "31337",
+    ago: "Yesterday",
+    ok: true,
+  },
+  { game: "forgerealms", what: "Joined realm Ember Vale", kind: "30078", ago: "Nov 19", ok: true },
   { game: "word5", what: "Rewrite follow list", kind: "3", ago: "Today", ok: false },
 ];
 
@@ -484,19 +499,26 @@ export const BUDGET = {
   ],
 };
 
-export const RECENT = [
-  "neonsentinel",
-  "nochess",
-  "forgerealms",
-  "xenophon",
-  "blockstr",
-  "sanki",
-].map(game);
+export const REQUEST = {
+  game: "neonsentinel",
+  kind: "30762",
+  what: "Score 12,040",
+  content: '{"score":12040,"wave":7}',
+};
 
-export const SIGN_IN_LABEL: Record<SignIn, string> = {
-  signer: "Signs through Keyhall",
-  "signer-or-nsec": "Signer, or asks for nsec",
-  throwaway: "Guest key",
-  none: "No login",
-  unknown: "Sign-in not checked",
+export const PLAYED_BY: Record<string, { handle: string; line: string }[]> = {
+  forgerealms: [
+    { handle: "juno", line: "Played Saturday · 1 h 10 m" },
+    { handle: "ren", line: "In their library" },
+  ],
+  neonsentinel: [{ handle: "kestrel", line: "Best 14,200 · Tuesday" }],
+  nochess: [{ handle: "ade", line: "Lost to you on Nov 12" }],
+};
+
+export const CURATOR: Record<SourceId, string> = {
+  picks: "Keyhall",
+  board: "Mira",
+  arcade: "kestrel",
+  coop: "Juno",
+  worlds: "Tomasz",
 };

@@ -1,225 +1,426 @@
 import { Button } from "@keyhall/ui/components/button";
 import { Switch } from "@keyhall/ui/components/switch";
-import { CheckIcon, CopyIcon } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
-import { Window } from "./kit.tsx";
-import { Dock } from "./variants/Dock.tsx";
-import { Inspector } from "./variants/Inspector.tsx";
-import { NowColumn } from "./variants/NowColumn.tsx";
-import { Shelves } from "./variants/Shelves.tsx";
-import { SourceList } from "./variants/SourceList.tsx";
+import { cn } from "@keyhall/ui/lib/utils";
+import { ArrowCounterClockwiseIcon, CheckIcon, CopyIcon } from "@phosphor-icons/react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  apply,
+  BOTTOM,
+  DEFAULT,
+  DENSITY,
+  FRIENDS_AT,
+  fromHash,
+  INSPECTOR,
+  MAIN,
+  RUNNING_AT,
+  SECTIONS,
+  SELECTABLE,
+  SIDEBAR,
+  spec,
+  toHash,
+  type Layout,
+  type Option,
+} from "./builder/config.ts";
+import { Shell } from "./builder/Shell.tsx";
+import { WinProvider } from "./builder/state.tsx";
+import { game } from "./data.ts";
+import { Cover, Window } from "./kit.tsx";
 
-type Variant = { id: string; name: string; idea: string; why: string[]; View: ComponentType };
+const KEY = "keyhall-ui-builder";
+const NOTES = "keyhall-ui-builder-notes";
 
-const VARIANTS: Variant[] = [
-  {
-    id: "source-list",
-    name: "Source list",
-    idea: "Sources are mailboxes: a Mail-style sidebar, friends in a column on the right, and an editor-style status bar for everything that is running.",
-    why: [
-      "Every curator is a first-class row with its own count, so turning a source off or adding one is never more than one click away.",
-      "The status bar holds the running game, the last signature and the month's budget in 40 pixels. It is always there and never in the way.",
-      "Friends get a full column, so who is playing what can be read at a glance without opening anything.",
-    ],
-    View: SourceList,
-  },
-  {
-    id: "dock",
-    name: "Now-playing dock",
-    idea: "A music-player layout: tabs in the title bar, the library full width, and a dock along the bottom that belongs to the running game.",
-    why: [
-      "The library gets the whole window, so cover art leads and sources become a row of filters.",
-      "The dock is the game's control surface: session time, who can see you, every signature as it happens, friends in the same game and what this game earns from your budget.",
-      "When nothing runs, the dock folds away and the window is all library.",
-    ],
-    View: Dock,
-  },
-  {
-    id: "now-column",
-    name: "Now column",
-    idea: "The window splits by time: a left column for what is live right now, the library for everything else.",
-    why: [
-      "Keyhall's difference is that play is social and signed. This puts both at the top-left, where the eye lands first.",
-      "Friends' games show as art with a Join button, so the shortest path to playing is joining someone.",
-      "Sources are tabs over the library, a lighter control than a sidebar for something set up once.",
-    ],
-    View: NowColumn,
-  },
-  {
-    id: "inspector",
-    name: "Inspector",
-    idea: "Three panes, as in Mail or Things: navigation, a dense game list, and a large inspector for the selected game.",
-    why: [
-      "Picking a game never leaves the library; the inspector answers 'can I trust it, who plays it, what does it cost me' beside the list.",
-      "The list is dense enough for a library of hundreds of games from many curators.",
-      "Running game and signer sit at the foot of the sidebar, like a now-playing card.",
-    ],
-    View: Inspector,
-  },
-  {
-    id: "shelves",
-    name: "Shelves and friend rail",
-    idea: "Each source is a shelf, the running game is a banner, and friends are a slim rail of faces on the right edge.",
-    why: [
-      "Curators read like people with taste: each shelf carries its curator's name and pitch, and hiding a shelf is unfollowing.",
-      "The running game is a banner at the top of home, so getting back into it is one click and its signatures are visible.",
-      "The friend rail costs 72 pixels; faces in a game wear that game's cover, so presence shows without a column of text.",
-    ],
-    View: Shelves,
-  },
-];
-
-type Picks = Record<string, { pick: boolean; note: string }>;
-const KEY = "keyhall-ui-layout-picks";
-
-function load(): Picks {
-  try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "{}");
-  } catch {
-    return {};
-  }
+function initial(): Layout {
+  const fromUrl = fromHash(location.hash);
+  if (fromUrl) return fromUrl;
+  const saved = fromHash(localStorage.getItem(KEY) ?? "");
+  return saved ?? DEFAULT;
 }
 
-function Fit({ children }: { children: React.ReactNode }) {
+function Fit({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   useLayoutEffect(() => {
     const el = ref.current!;
-    const ro = new ResizeObserver(() => setScale(Math.min(1, el.clientWidth / 1440)));
+    const ro = new ResizeObserver(() =>
+      setScale(Math.min(1, el.clientWidth / 1440, (window.innerHeight - 48) / 900)),
+    );
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
   return (
-    <div ref={ref} className="w-full" style={{ height: 900 * scale }}>
-      <div className="mx-auto w-[1440px] origin-top-left" style={{ transform: `scale(${scale})` }}>
-        {children}
+    <div ref={ref} className="min-w-0 flex-1">
+      <div style={{ height: 900 * scale, width: 1440 * scale }} className="mx-auto">
+        <div className="frame w-[1440px] origin-top-left" style={{ transform: `scale(${scale})` }}>
+          {children}
+        </div>
       </div>
     </div>
   );
 }
 
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="py-3.5">
+      <div className="mb-2 text-[12px] font-medium text-foreground/90">{label}</div>
+      {children}
+      {hint && (
+        <p className="mt-1.5 text-[12px] leading-snug text-muted-foreground text-pretty">{hint}</p>
+      )}
+    </div>
+  );
+}
+
+function Segmented<V extends string>({
+  name,
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  name: string;
+  options: readonly Option<V>[];
+  value: V;
+  onChange: (v: V) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={name}
+      data-control={name}
+      className={cn(
+        "grid gap-0.5 rounded-lg bg-black/30 p-0.5 ring-1 ring-white/[0.06]",
+        options.length === 3 ? "grid-cols-3" : "grid-cols-2",
+        disabled && "pointer-events-none opacity-40",
+      )}
+    >
+      {options.map((o) => (
+        <button
+          key={o.value}
+          role="radio"
+          aria-checked={value === o.value}
+          data-value={o.value}
+          title={o.hint}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "h-8 truncate rounded-md px-1.5 text-[12px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+            value === o.value
+              ? "bg-white/[0.1] font-medium text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+              : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const hintOf = <V extends string>(options: readonly Option<V>[], v: V) =>
+  options.find((o) => o.value === v)!.hint;
+
+function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+  disabled,
+  name,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  name: string;
+}) {
+  return (
+    <label className={cn("flex items-center gap-3 py-2", disabled && "opacity-45")}>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px]">{label}</div>
+        {hint && <div className="text-[12px] text-muted-foreground">{hint}</div>}
+      </div>
+      <Switch
+        data-control={name}
+        checked={checked}
+        onCheckedChange={onChange}
+        disabled={disabled}
+      />
+    </label>
+  );
+}
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="border-t border-white/[0.06] px-5 pt-4 pb-1">
+      <h2 className="text-[13px] font-semibold">{title}</h2>
+      <div className="divide-y divide-white/[0.04]">{children}</div>
+    </section>
+  );
+}
+
 export function Page() {
-  const [picks, setPicks] = useState<Picks>(load);
+  const [layout, setLayout] = useState<Layout>(initial);
+  const [notes, setNotes] = useState(() => localStorage.getItem(NOTES) ?? "");
   const [copied, setCopied] = useState(false);
-  useEffect(() => localStorage.setItem(KEY, JSON.stringify(picks)), [picks]);
-  const set = (id: string, patch: Partial<Picks[string]>) =>
-    setPicks((p) => ({ ...p, [id]: { pick: false, note: "", ...p[id], ...patch } }));
-  const chosen = VARIANTS.filter((v) => picks[v.id]?.pick || picks[v.id]?.note);
+  const set = (patch: Partial<Layout>) => setLayout((l) => apply(l, patch));
+
+  useEffect(() => {
+    const hash = toHash(layout);
+    if (location.hash !== hash) history.replaceState(null, "", hash);
+    localStorage.setItem(KEY, hash);
+  }, [layout]);
+  useEffect(() => localStorage.setItem(NOTES, notes), [notes]);
+  useEffect(() => {
+    const onHash = () => {
+      const next = fromHash(location.hash);
+      if (next) setLayout(next);
+    };
+    addEventListener("hashchange", onHash);
+    return () => removeEventListener("hashchange", onHash);
+  }, []);
+
   const copy = async () => {
-    const text = [
-      "Keyhall layout picks",
-      ...VARIANTS.map((v, i) => {
-        const p = picks[v.id];
-        const mark = p?.pick ? "PICK" : "-";
-        return `${i + 1}. ${v.name}: ${mark}${p?.note ? ` (${p.note})` : ""}`;
-      }),
-    ].join("\n");
-    await navigator.clipboard.writeText(text);
+    const text = spec(layout, (id) => game(id).name, notes, location.href);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const t = Object.assign(document.createElement("textarea"), { value: text });
+      document.body.append(t);
+      t.select();
+      document.execCommand("copy");
+      t.remove();
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
 
+  const noInspector = layout.inspector === "none";
   return (
-    <div className="min-h-screen bg-[#0b0c10] pb-24">
-      <header className="sticky top-0 z-20 border-b border-white/[0.06] bg-[#0b0c10]/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[1440px] items-center gap-6 px-6">
-          <span className="font-semibold">Keyhall layout</span>
-          <nav className="flex gap-1 text-[13px] text-muted-foreground">
-            {VARIANTS.map((v, i) => (
-              <a
-                key={v.id}
-                href={`#${v.id}`}
-                className="rounded-md px-2.5 py-1 hover:bg-white/[0.06] hover:text-foreground"
-              >
-                {i + 1}. {v.name}
-                {picks[v.id]?.pick && (
-                  <CheckIcon weight="bold" className="ml-1 inline size-3 text-primary" />
-                )}
-              </a>
-            ))}
-          </nav>
-          <Button size="sm" className="ml-auto" onClick={copy} id="copy-picks">
-            {copied ? (
-              <CheckIcon data-icon="inline-start" />
-            ) : (
-              <CopyIcon data-icon="inline-start" />
-            )}
-            {copied ? "Copied" : `Copy picks${chosen.length ? ` (${chosen.length})` : ""}`}
-          </Button>
-        </div>
-      </header>
+    <div className="flex min-h-screen items-start gap-6 bg-[#0b0c10] py-6 pl-6">
+      <Fit>
+        <Window className="shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)]">
+          <WinProvider layout={layout} set={set}>
+            <Shell />
+          </WinProvider>
+        </Window>
+      </Fit>
 
-      <section className="mx-auto max-w-[1440px] px-6 pt-14 pb-6">
-        <h1 className="text-[28px] font-semibold tracking-[-0.02em] text-balance">
-          Part 1: the window layout
-        </h1>
-        <p className="mt-3 max-w-[68ch] text-[15px] leading-relaxed text-foreground/80 text-pretty">
-          Five ways to arrange the Keyhall window: where the library, sources, friends, budget and
-          the running game with its signer live, and how the main area is divided. Colours, cards
-          and the game page come in later rounds, so judge the structure. Each is drawn at 1440 ×
-          900 with the app's own theme and components. Pick one or more, leave a note, and copy your
-          picks back.
-        </p>
-        <p className="mt-3 max-w-[68ch] text-[13px] leading-relaxed text-muted-foreground">
-          Game names, art and descriptions come from the November scout. Friends, play time,
-          signatures and budget figures are illustrative.
-        </p>
-      </section>
+      <aside className="no-scrollbar sticky top-0 -my-6 flex h-screen w-[340px] shrink-0 flex-col overflow-y-auto border-l border-white/[0.06] bg-[#111217]">
+        <header className="px-5 pt-6 pb-4">
+          <h1 className="text-[17px] font-semibold tracking-[-0.01em]">Keyhall layout builder</h1>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground text-pretty">
+            Put the window together region by region. It starts from 1 + 2 + 4: the source list, the
+            now-playing dock and the inspector. The window is live: click games, sources and
+            switches.
+          </p>
+        </header>
 
-      {VARIANTS.map((v, i) => {
-        const p = picks[v.id];
-        return (
-          <section
-            key={v.id}
-            id={v.id}
-            className="variant mx-auto max-w-[1440px] scroll-mt-14 pt-16"
+        <Group title="Regions">
+          <Field label="Left sidebar" hint={hintOf(SIDEBAR, layout.sidebar)}>
+            <Segmented
+              name="sidebar"
+              options={SIDEBAR}
+              value={layout.sidebar}
+              onChange={(sidebar) => set({ sidebar })}
+            />
+          </Field>
+          <Field label="Main area" hint={hintOf(MAIN, layout.main)}>
+            <Segmented
+              name="main"
+              options={MAIN}
+              value={layout.main}
+              onChange={(main) => set({ main })}
+            />
+          </Field>
+          <Field
+            label="Inspector"
+            hint={
+              layout.selected || noInspector
+                ? hintOf(INSPECTOR, layout.inspector)
+                : "Select a game to open it."
+            }
           >
-            <div className="grid grid-cols-[1fr_340px] gap-12 px-6 pb-7">
-              <div>
-                <h2 className="flex items-baseline gap-3 text-[22px] font-semibold tracking-[-0.015em]">
-                  <span className="text-muted-foreground tabular-nums">{i + 1}</span>
-                  {v.name}
-                </h2>
-                <p className="mt-2 max-w-[70ch] text-[15px] leading-relaxed text-foreground/90">
-                  {v.idea}
-                </p>
-                <ul className="mt-3 grid max-w-[78ch] gap-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                  {v.why.map((w) => (
-                    <li key={w} className="flex gap-2.5">
-                      <span className="mt-[9px] size-1 shrink-0 rounded-full bg-muted-foreground/60" />
-                      {w}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="pick self-end rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.06]">
-                <label className="flex items-center justify-between gap-3 text-[13px] font-medium">
-                  Pick this
-                  <Switch
-                    checked={!!p?.pick}
-                    onCheckedChange={(pick) => set(v.id, { pick })}
-                    aria-label={`Pick ${v.name}`}
-                  />
-                </label>
-                <textarea
-                  value={p?.note ?? ""}
-                  onChange={(e) => set(v.id, { note: e.target.value })}
-                  placeholder="Note: what to keep, what to change"
-                  rows={2}
-                  className="mt-3 w-full resize-none rounded-lg bg-black/30 px-3 py-2 text-[13px] ring-1 ring-white/[0.08] outline-none placeholder:text-muted-foreground focus:ring-primary/60"
-                />
-              </div>
+            <Segmented
+              name="inspector"
+              options={INSPECTOR}
+              value={layout.inspector}
+              onChange={(inspector) => set({ inspector })}
+            />
+          </Field>
+          <Field label="Inspector sections">
+            <div
+              data-control="sections"
+              className={cn(
+                "flex flex-wrap gap-1.5",
+                noInspector && "pointer-events-none opacity-40",
+              )}
+            >
+              {SECTIONS.map((s) => {
+                const on = layout.sections.includes(s.value);
+                return (
+                  <button
+                    key={s.value}
+                    aria-pressed={on}
+                    data-value={s.value}
+                    title={s.hint}
+                    onClick={() =>
+                      set({
+                        sections: on
+                          ? layout.sections.filter((x) => x !== s.value)
+                          : SECTIONS.map((x) => x.value).filter(
+                              (x) => x === s.value || layout.sections.includes(x),
+                            ),
+                      })
+                    }
+                    className={cn(
+                      "flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] ring-1 transition-colors",
+                      on
+                        ? "bg-primary/[0.12] text-primary ring-primary/35"
+                        : "text-muted-foreground ring-white/10 hover:text-foreground hover:ring-white/20",
+                    )}
+                  >
+                    {on && <CheckIcon weight="bold" className="size-3" />}
+                    {s.label}
+                  </button>
+                );
+              })}
             </div>
-            <Fit>
-              <div className="frame">
-                <Window>
-                  <v.View />
-                </Window>
-              </div>
-            </Fit>
-          </section>
-        );
-      })}
+          </Field>
+          <Field label="Bottom" hint={hintOf(BOTTOM, layout.bottom)}>
+            <Segmented
+              name="bottom"
+              options={BOTTOM}
+              value={layout.bottom}
+              onChange={(bottom) => set({ bottom })}
+            />
+          </Field>
+          <Field
+            label="Friends"
+            hint={
+              layout.friends === "inspector" && noInspector
+                ? "With no inspector, friends don't show anywhere."
+                : hintOf(FRIENDS_AT, layout.friends)
+            }
+          >
+            <Segmented
+              name="friends"
+              options={FRIENDS_AT}
+              value={layout.friends}
+              onChange={(friends) => set({ friends })}
+            />
+          </Field>
+          <Field
+            label="Running game"
+            hint="Moves with Bottom: the dock and the status bar both hold the running game."
+          >
+            <Segmented
+              name="running"
+              options={RUNNING_AT}
+              value={layout.running}
+              onChange={(running) => set({ running })}
+            />
+          </Field>
+          <Field label="Density">
+            <Segmented
+              name="density"
+              options={DENSITY}
+              value={layout.density}
+              onChange={(density) => set({ density })}
+            />
+          </Field>
+        </Group>
+
+        <Group title="State">
+          <Toggle
+            name="playing"
+            label="A game is running"
+            hint="Neon Sentinel, 23 min in"
+            checked={layout.playing}
+            onChange={(playing) => set({ playing })}
+          />
+          <Toggle
+            name="signing"
+            label="Signing request"
+            hint={layout.playing ? "It asks to sign a score" : "Needs a running game"}
+            checked={layout.signing}
+            disabled={!layout.playing}
+            onChange={(signing) => set({ signing })}
+          />
+          <Field label="Selected game">
+            <div data-control="selected" className="grid grid-cols-5 gap-1.5">
+              {[null, ...SELECTABLE].map((id) => {
+                const on = layout.selected === id;
+                return (
+                  <button
+                    key={id ?? "none"}
+                    data-value={id ?? "none"}
+                    aria-pressed={on}
+                    title={id ? game(id).name : "No game selected"}
+                    onClick={() => set({ selected: id })}
+                    className={cn(
+                      "aspect-[4/3] overflow-hidden rounded-md ring-1 transition-shadow",
+                      on ? "ring-2 ring-primary" : "ring-white/10 hover:ring-white/30",
+                    )}
+                  >
+                    {id ? (
+                      <Cover game={game(id)} className="size-full" />
+                    ) : (
+                      <span className="grid size-full place-items-center bg-black/30 text-[11px] text-muted-foreground">
+                        None
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[12px] text-muted-foreground">
+              {layout.selected ? game(layout.selected).name : "Nothing selected"}
+            </p>
+          </Field>
+        </Group>
+
+        <section className="mt-auto border-t border-white/[0.06] px-5 pt-4 pb-5">
+          <label htmlFor="notes" className="text-[13px] font-semibold">
+            Notes
+          </label>
+          <textarea
+            id="notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="What to keep, what to change"
+            rows={3}
+            className="mt-2 w-full resize-none rounded-lg bg-black/30 px-3 py-2 text-[13px] ring-1 ring-white/[0.08] outline-none placeholder:text-muted-foreground focus:ring-primary/60"
+          />
+          <div className="mt-3 flex gap-2">
+            <Button id="copy-layout" className="flex-1" onClick={copy}>
+              {copied ? (
+                <CheckIcon data-icon="inline-start" />
+              ) : (
+                <CopyIcon data-icon="inline-start" />
+              )}
+              {copied ? "Copied" : "Copy my layout"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              aria-label="Reset to 1 + 2 + 4"
+              title="Reset to 1 + 2 + 4"
+              onClick={() => setLayout(DEFAULT)}
+            >
+              <ArrowCounterClockwiseIcon />
+            </Button>
+          </div>
+        </section>
+      </aside>
     </div>
   );
 }
