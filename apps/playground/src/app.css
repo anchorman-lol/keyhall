@@ -1,0 +1,17 @@
+@import "@keyhall/ui/globals.css";
+
+@source ".";
+@source "../../../packages/ui/src";
+
+@theme inline {
+  --color-online: oklch(0.78 0.16 152);
+  --color-ingame: oklch(0.8 0.13 230);
+}
+
+body {
+  font-feature-settings: "cv11", "ss01";
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
