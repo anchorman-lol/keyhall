@@ -18,6 +18,8 @@ fn main() {
             "nostr_get_public_key",
             "nostr_sign_event",
             "nostr_observe",
+            "nostr_key_field",
+            "sign_label",
         ]),
     ))
     .expect("failed to run tauri-build");

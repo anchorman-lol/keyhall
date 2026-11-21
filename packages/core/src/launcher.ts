@@ -2,8 +2,16 @@ import { decode, npubEncode } from "nostr-tools/nip19";
 import { verifyEvent, type Event } from "nostr-tools/pure";
 import { assign, enqueueActions, fromCallback, fromPromise, setup } from "xstate";
 import { monthKey, monthName, playTime, split, type Session } from "./budget";
-import { parseListRef, PICKS, type CuratorList, type ListRef } from "./curation";
-import { classifyDepth, resolveDepth, type Observation } from "./depth";
+import { parseListRef, PICKS, PICKS_PUBKEY, type CuratorList, type ListRef } from "./curation";
+import type { Depth, Observation } from "./depth";
+import {
+  depthVerdict,
+  labelTemplate,
+  parseLabels,
+  signInVerdict,
+  type Claim,
+  type Label,
+} from "./labels";
 import type { Game } from "./listing";
 import {
   DEFAULT_PRESENCE,
@@ -51,7 +59,8 @@ export type LauncherEvent =
   | { type: "shim"; call: ShimCall }
   | { type: "observed"; coordinate: string; kinds: number[] }
   | { type: "closed"; coordinate: string }
-  | { type: "sign-request"; request: SignRequest };
+  | { type: "sign-request"; request: SignRequest }
+  | { type: "key-field"; coordinate: string };
 
 type KeyCommand = "generate_key" | "import_key";
 
@@ -68,6 +77,9 @@ export interface LauncherDeps extends PresenceDeps {
   answer(id: number, allow: boolean): void;
   listen(send: (event: LauncherEvent) => void): () => void;
   saveObserved(observed: Record<string, Observation>): void;
+  fetchLabels(curators: string[]): Promise<Label[]>;
+  signLabel(template: ReturnType<typeof labelTemplate>): Promise<Event>;
+  publish(event: Event): Promise<void>;
   fetchFriends(pubkey: string): Promise<Friend[]>;
   savePresence(presence: PresenceSettings, circle: Circle | undefined): void;
   sessions(): Promise<Session[]>;
@@ -108,6 +120,10 @@ export interface LauncherContext {
   observed: Record<string, Observation>;
   windows: Record<string, string>;
   requests: SignRequest[];
+  labels: Label[];
+  labelled: string[];
+  labelError: string;
+  keyWarnings: string[];
   current?: Game;
   view?: "budget" | "settings";
   friends?: Friend[];
@@ -145,7 +161,10 @@ type Events =
   | { type: "wallet.connect"; uri: string }
   | { type: "budget.pay"; month: string }
   | { type: "zap.done"; month: string; payment: Payment; error?: string }
-  | { type: "zap.finished" };
+  | { type: "zap.finished" }
+  | { type: "labels.loaded"; labels: Label[] }
+  | { type: "label.publish"; game: Game; methods: string[]; depth: Depth | undefined }
+  | { type: "warning.dismiss" };
 
 const record = (
   context: LauncherContext,
@@ -194,9 +213,22 @@ export const updatedAt = (context: LauncherContext, game: Game) =>
 export const observedKinds = (context: LauncherContext, game: Game) =>
   context.observed[game.coordinate]?.kinds ?? [];
 
-export function depthOf(context: LauncherContext, game: Game) {
-  const seen = context.observed[game.coordinate];
-  return resolveDepth(game.depth, seen && classifyDepth(seen));
+const enabledLists = (context: LauncherContext) =>
+  sourceList(context.sources)
+    .filter((s) => s.enabled)
+    .flatMap((s) => context.fetched[s.id]?.lists ?? []);
+
+const curators = (context: LauncherContext) => [
+  ...new Set(enabledLists(context).map((l) => l.pubkey)),
+];
+
+export function curatorName(context: LauncherContext, pubkey: string) {
+  if (pubkey === PICKS_PUBKEY) return PICKS;
+  const npub = npubEncode(pubkey);
+  return (
+    enabledLists(context).find((l) => l.pubkey === pubkey)?.title ??
+    `${npub.slice(0, 10)}…${npub.slice(-4)}`
+  );
 }
 
 const pubkeyOf = (context: LauncherContext) =>
@@ -238,6 +270,24 @@ export function monthSplit(context: LauncherContext, month: string) {
     payments: payments(shares, games).filter((p) => !(p.key in paid)),
   };
 }
+
+export const isCurator = (context: LauncherContext) =>
+  curators(context).includes(pubkeyOf(context) ?? "");
+
+function claims<K extends "signIn" | "depth">(context: LauncherContext, game: Game, key: K) {
+  return curators(context).flatMap((curator) => {
+    const value = context.labels.find(
+      (l) => l.curator === curator && l.coordinate === game.coordinate,
+    )?.[key];
+    return value ? [{ from: curator, value } as Claim<NonNullable<Label[K]>>] : [];
+  });
+}
+
+export const signInOf = (context: LauncherContext, game: Game) =>
+  signInVerdict(game.signIn, claims(context, game, "signIn"), context.observed[game.coordinate]);
+
+export const depthOf = (context: LauncherContext, game: Game) =>
+  depthVerdict(game.depth, claims(context, game, "depth"), context.observed[game.coordinate]);
 
 export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
   setup({
@@ -295,6 +345,21 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           sendBack({ type: "zap.finished" });
         })();
       }),
+      fetchLabels: fromCallback<Events, string[]>(({ input, sendBack }) => {
+        void deps
+          .fetchLabels(input)
+          .catch(() => [])
+          .then((labels) => sendBack({ type: "labels.loaded", labels }));
+      }),
+      publishLabel: fromPromise<Event, Extract<Events, { type: "label.publish" }>>(
+        async ({ input }) => {
+          const event = await deps.signLabel(
+            labelTemplate(input.game.coordinate, input.methods, input.depth),
+          );
+          await deps.publish(event);
+          return event;
+        },
+      ),
     },
     actions: {
       saveObserved: ({ context }) => deps.saveObserved(context.observed),
@@ -334,6 +399,10 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       wallet: null,
       walletError: "",
       payErrors: {},
+      labels: [],
+      labelled: [],
+      labelError: "",
+      keyWarnings: [],
     },
     invoke: { src: "listen" },
     entry: "fetchSources",
@@ -366,6 +435,9 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       "source.loaded": {
         actions: enqueueActions(({ context, event, enqueue }) => {
           const fresh = event.games.filter((g) => !context.listings[g.coordinate]);
+          const unlabelled = [...new Set(event.lists.map((l) => l.pubkey))].filter(
+            (p) => !context.labelled.includes(p),
+          );
           enqueue.assign({
             loading: context.loading.filter((id) => id !== event.id),
             fetched: {
@@ -378,7 +450,28 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
             },
           });
           if (fresh.length) enqueue.spawnChild("fetchUpdates", { input: fresh });
+          if (unlabelled.length) {
+            enqueue.assign({ labelled: [...context.labelled, ...unlabelled] });
+            enqueue.spawnChild("fetchLabels", { input: unlabelled });
+          }
         }),
+      },
+      "labels.loaded": {
+        actions: assign({ labels: ({ context, event }) => [...context.labels, ...event.labels] }),
+      },
+      "key-field": {
+        actions: [
+          assign(({ context, event }) => ({
+            observed: record(context, event.coordinate, (o) => ({ ...o, keyField: true })),
+            keyWarnings: context.keyWarnings.includes(event.coordinate)
+              ? context.keyWarnings
+              : [...context.keyWarnings, event.coordinate],
+          })),
+          "saveObserved",
+        ],
+      },
+      "warning.dismiss": {
+        actions: assign({ keyWarnings: ({ context }) => context.keyWarnings.slice(1) }),
       },
       updated: {
         actions: assign({
@@ -460,8 +553,8 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       shim: {
         actions: [
           assign(({ context, event: { call } }) => {
-            const pubkey = context.npub && decode(context.npub as `npub1${string}`).data;
-            const verified = call.event && verifyEvent(call.event) && call.event.pubkey === pubkey;
+            const verified =
+              call.event && verifyEvent(call.event) && call.event.pubkey === pubkeyOf(context);
             return {
               calls: [...context.calls, { ...call, verified }],
               observed: record(context, call.coordinate, (o) => ({ ...o, signer: true })),
@@ -595,6 +688,33 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
               onError: {
                 target: "idle",
                 actions: assign({ published: ({ context }) => wantedPresence(context) }),
+              },
+            },
+          },
+        },
+      },
+      label: {
+        initial: "idle",
+        states: {
+          idle: {
+            on: { "label.publish": { target: "publishing", actions: assign({ labelError: "" }) } },
+          },
+          publishing: {
+            invoke: {
+              src: "publishLabel",
+              input: ({ event }) => event as Extract<Events, { type: "label.publish" }>,
+              onDone: {
+                target: "idle",
+                actions: assign({
+                  labels: ({ context, event }) => [
+                    ...parseLabels([event.output]),
+                    ...context.labels,
+                  ],
+                }),
+              },
+              onError: {
+                target: "idle",
+                actions: assign({ labelError: ({ event }) => String(event.error) }),
               },
             },
           },

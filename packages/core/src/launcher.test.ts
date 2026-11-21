@@ -7,9 +7,13 @@ import { describe, expect, it, vi } from "vitest";
 import { createActor, waitFor } from "xstate";
 import { monthKey, monthRange, previousMonth, type Session } from "./budget";
 import { PICKS_REF, type CuratorList, type ListRef } from "./curation";
+import type { Label } from "./labels";
 import {
+  curatorName,
   depthOf,
   findGame,
+  isCurator,
+  signInOf,
   launcherMachine,
   library,
   monthSplit,
@@ -30,9 +34,15 @@ const npub = npubEncode(getPublicKey(secret));
 const signed = (key = secret) =>
   finalizeEvent({ kind: 1, content: "hi", tags: [], created_at: 1 }, key);
 
-const game = { coordinate: "31990:abc:blockstr", name: "Blockstr", createdAt: 100 } as Game;
+const game = {
+  coordinate: "31990:abc:blockstr",
+  name: "Blockstr",
+  createdAt: 100,
+  signIn: "signer",
+} as Game;
 const spam = { coordinate: "31990:def:spam", name: "Spam", createdAt: 100 } as Game;
-const curatorKey = getPublicKey(generateSecretKey());
+const curatorSecret = generateSecretKey();
+const curatorKey = getPublicKey(curatorSecret);
 const listOf = (ref: ListRef, games: Game[]): CuratorList => ({
   address: `30267:${ref.pubkey}:${ref.d ?? "games"}`,
   pubkey: ref.pubkey,
@@ -81,6 +91,8 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
       return () => {};
     },
     saveObserved: vi.fn(),
+    fetchLabels: async () => [],
+    signLabel: async (template) => finalizeEvent(template, curatorSecret),
     ...signerFor(secret),
     ...relay(),
     fetchFriends: async () => [],
@@ -276,7 +288,112 @@ describe("signer", () => {
     const { context } = actor.getSnapshot();
     expect(context.observed[game.coordinate]).toEqual({ kinds: [0, 1, 9735], signer: true });
     expect(deps.saveObserved).toHaveBeenLastCalledWith(context.observed);
-    expect(depthOf(context, game)).toEqual({ depth: "identity", verified: true });
+    expect(depthOf(context, game)).toMatchObject({ value: "identity", seen: true });
+  });
+});
+
+describe("verification", () => {
+  const picksLabel: Label = {
+    curator: PICKS_REF.pubkey,
+    coordinate: game.coordinate,
+    signIn: "signer-or-nsec",
+    depth: "identity",
+  };
+  const curatorLabel: Label = {
+    curator: curatorKey,
+    coordinate: game.coordinate,
+    signIn: "signer",
+  };
+  const fetchLabels = vi.fn(async (curators: string[]) =>
+    [picksLabel, curatorLabel].filter((l) => curators.includes(l.curator)),
+  );
+  const labelled = (s: { context: { loading: string[]; labels: Label[] } }) =>
+    s.context.loading.length === 0 && s.context.labels.length > 0;
+
+  it("reads labels from the curators of enabled sources and says who verified what", async () => {
+    fetchLabels.mockClear();
+    const { actor } = start({ fetchLabels });
+    await waitFor(actor, labelled);
+    const { context } = actor.getSnapshot();
+    expect(fetchLabels).toHaveBeenCalledWith([PICKS_REF.pubkey]);
+    expect(curatorName(context, PICKS_REF.pubkey)).toBe("Keyhall picks");
+    expect(signInOf(context, game)).toEqual({
+      value: "signer-or-nsec",
+      verifiedBy: [PICKS_REF.pubkey],
+      conflicts: [{ from: "listing", value: "signer" }],
+    });
+    expect(depthOf(context, game)).toMatchObject({
+      value: "identity",
+      verifiedBy: [PICKS_REF.pubkey],
+    });
+    actor.send({ type: "source.toggle", id: PICKS_ID });
+    expect(signInOf(actor.getSnapshot().context, game).verifiedBy).toEqual([]);
+  });
+
+  it("fetches a new curator's labels once and shows their disagreement", async () => {
+    fetchLabels.mockClear();
+    const { actor } = start({ fetchLabels });
+    await waitFor(actor, labelled);
+    actor.send({ type: "source.add", input: npubEncode(curatorKey) });
+    await waitFor(actor, (s) => s.context.labels.length === 2);
+    expect(fetchLabels).toHaveBeenLastCalledWith([curatorKey]);
+    expect(fetchLabels).toHaveBeenCalledTimes(2);
+    const { context } = actor.getSnapshot();
+    expect(curatorName(context, curatorKey)).toBe("A list");
+    expect(signInOf(context, game).conflicts).toEqual([
+      { from: "listing", value: "signer" },
+      { from: curatorKey, value: "signer" },
+    ]);
+  });
+
+  it("warns about a key-shaped field once per game and records it", () => {
+    const { actor, deps, emit } = start();
+    emit({ type: "key-field", coordinate: game.coordinate });
+    emit({ type: "key-field", coordinate: game.coordinate });
+    const { context } = actor.getSnapshot();
+    expect(context.keyWarnings).toEqual([game.coordinate]);
+    expect(context.observed[game.coordinate]).toEqual({ kinds: [], signer: false, keyField: true });
+    expect(deps.saveObserved).toHaveBeenLastCalledWith(context.observed);
+    expect(signInOf(context, game).conflicts).toEqual([{ from: "window", value: "nsec" }]);
+    actor.send({ type: "warning.dismiss" });
+    expect(actor.getSnapshot().context.keyWarnings).toEqual([]);
+  });
+
+  it("lets a curator label a game, publishing only once confirmed", async () => {
+    const signLabel = vi.fn(async (t: Parameters<LauncherDeps["signLabel"]>[0]) =>
+      finalizeEvent(t, curatorSecret),
+    );
+    const { actor, deps } = start(
+      { keyStatus: async () => npubEncode(curatorKey), signLabel },
+      {
+        sources: { ...defaultSources, curators: [{ ref: { pubkey: curatorKey }, enabled: true }] },
+      },
+    );
+    await waitFor(actor, (s) => s.matches({ key: "ready" }) && s.context.loading.length === 0);
+    expect(isCurator(actor.getSnapshot().context)).toBe(true);
+    expect(signLabel).not.toHaveBeenCalled();
+    actor.send({ type: "label.publish", game, methods: ["nip07", "nsec"], depth: "identity" });
+    await waitFor(actor, (s) => s.matches({ label: "idle" }) && s.context.labels.length > 0);
+    expect(signLabel.mock.calls[0]![0].tags).toContainEqual(["a", game.coordinate]);
+    expect(deps.publish).toHaveBeenCalledWith(await signLabel.mock.results[0]!.value);
+    expect(signInOf(actor.getSnapshot().context, game)).toMatchObject({
+      value: "signer-or-nsec",
+      verifiedBy: [curatorKey],
+    });
+  });
+
+  it("keeps the label unpublished and reports why when relays refuse", async () => {
+    const { actor } = start({ publish: () => Promise.reject(new Error("blocked")) });
+    actor.send({ type: "label.publish", game, methods: ["nip07"], depth: undefined });
+    await waitFor(actor, (s) => s.context.labelError !== "");
+    expect(actor.getSnapshot().context.labelError).toMatch(/blocked/);
+    expect(actor.getSnapshot().context.labels).toEqual([]);
+  });
+
+  it("isn't a curator without a key on an enabled source", async () => {
+    const { actor } = start({ keyStatus: async () => npub });
+    await waitFor(actor, (s) => s.matches({ key: "ready" }) && s.context.loading.length === 0);
+    expect(isCurator(actor.getSnapshot().context)).toBe(false);
   });
 });
 

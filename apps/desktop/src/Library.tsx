@@ -1,7 +1,7 @@
-import { depthOf, library, sourceLabel, updatedAt } from "@keyhall/core/launcher";
+import { depthOf, library, signInOf, sourceLabel, updatedAt } from "@keyhall/core/launcher";
 import type { Game } from "@keyhall/core/listing";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@keyhall/ui/components/empty";
-import { DepthBadge, SignInBadge } from "./badges.tsx";
+import { DepthBadge, SignInBadge, verifiers } from "./badges.tsx";
 import { FriendsPlaying } from "./Friends.tsx";
 import { formatDate, Launcher } from "./launcher.ts";
 
@@ -38,7 +38,8 @@ export function Library() {
       <h1 className="mb-5 text-2xl font-semibold">All games</h1>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-5">
         {entries.map(({ game, from }) => {
-          const { depth, verified } = depthOf(context, game);
+          const signIn = signInOf(context, game);
+          const depth = depthOf(context, game);
           return (
             <button
               key={game.coordinate}
@@ -55,8 +56,8 @@ export function Library() {
                   {from.map((id) => sourceLabel(context, id)).join(" · ")}
                 </span>
                 <div className="mt-1 flex flex-wrap gap-1.5">
-                  <SignInBadge signIn={game.signIn} />
-                  <DepthBadge depth={depth} verified={verified} />
+                  <SignInBadge verdict={signIn} by={verifiers(context, signIn)} />
+                  <DepthBadge verdict={depth} by={verifiers(context, depth)} />
                 </div>
                 <FriendsPlaying coordinate={game.coordinate} />
               </div>

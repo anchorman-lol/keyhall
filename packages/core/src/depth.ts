@@ -1,8 +1,10 @@
 export type Depth = "multiplayer" | "identity" | "none";
+export const DEPTHS: readonly string[] = ["multiplayer", "identity", "none"] satisfies Depth[];
 
 export interface Observation {
   kinds: number[];
   signer: boolean;
+  keyField?: boolean;
 }
 
 const IDENTITY_KINDS = new Set([
@@ -14,8 +16,4 @@ export function classifyDepth({ kinds, signer }: Observation): Depth | undefined
   if (kinds.some((k) => !IDENTITY_KINDS.has(k) && !isEphemeral(k))) return "multiplayer";
   if (signer || kinds.some((k) => IDENTITY_KINDS.has(k))) return "identity";
   return kinds.length ? "none" : undefined;
-}
-
-export function resolveDepth(declared: Depth | undefined, observed: Depth | undefined) {
-  return { depth: observed ?? declared, verified: observed !== undefined };
 }
