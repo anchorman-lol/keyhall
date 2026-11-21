@@ -7,6 +7,7 @@ import {
   fetchLists,
   publish,
   subscribe,
+  zap,
 } from "@keyhall/core/relays";
 import { loadSources } from "@keyhall/core/sources";
 import { shimScript } from "@keyhall/core/shim";
@@ -63,10 +64,20 @@ const machine = launcherMachine(
     nip44Decrypt: (pubkey, text) => invoke("nip44_decrypt", { pubkey, text }),
     savePresence: (presence, circle) =>
       localStorage.setItem("presence", JSON.stringify({ presence, circle })),
+    sessions: () => invoke("play_sessions"),
+    walletStatus: () => invoke("wallet_status"),
+    connectWallet: (uri) => invoke("connect_wallet", { uri }),
+    pay: (payment, comment) =>
+      zap(payment, comment, {
+        request: (invoice) => invoke("wallet_pay_request", { invoice }),
+        result: (reply) => invoke("wallet_pay_result", { reply }),
+      }),
+    saveBudget: (budget) => localStorage.setItem("budget", JSON.stringify(budget)),
   },
   {
     observed: JSON.parse(localStorage.getItem("observed") ?? "{}"),
     sources: loadSources(JSON.parse(localStorage.getItem("sources") ?? "null")),
+    budget: JSON.parse(localStorage.getItem("budget") ?? "null") ?? undefined,
     ...JSON.parse(localStorage.getItem("presence") ?? "{}"),
   },
 );

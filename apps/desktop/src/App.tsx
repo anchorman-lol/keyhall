@@ -1,5 +1,6 @@
 import { Button } from "@keyhall/ui/components/button";
-import { GearIcon, KeyholeIcon } from "@phosphor-icons/react";
+import { GearIcon, KeyholeIcon, WalletIcon } from "@phosphor-icons/react";
+import { BudgetPage } from "./BudgetPage.tsx";
 import { FriendsPanel } from "./Friends.tsx";
 import { PresenceSettings } from "./PresenceSettings.tsx";
 import { GamePage } from "./GamePage.tsx";
@@ -16,7 +17,7 @@ const heading =
 
 export function App() {
   const context = Launcher.useSelector((s) => s.context);
-  const { current, npub, calls, settings } = context;
+  const { current, view, npub, calls } = context;
   const active = playing(context).length;
   const { send } = Launcher.useActorRef();
   const gameName = (c: ShimCall) => findGame(context, c.coordinate)?.name ?? "";
@@ -28,12 +29,20 @@ export function App() {
           Keyhall
         </div>
         <Button
-          variant={current || settings ? "ghost" : "secondary"}
+          variant={current || view ? "ghost" : "secondary"}
           className="w-full justify-between"
           onClick={() => send({ type: "select" })}
         >
           All games
           <span className="text-muted-foreground">{library(context).length}</span>
+        </Button>
+        <Button
+          variant={view === "budget" ? "secondary" : "ghost"}
+          className="w-full justify-start"
+          onClick={() => send({ type: "view", view: "budget" })}
+        >
+          <WalletIcon data-icon="inline-start" />
+          Monthly budget
         </Button>
         <h2 className={`${heading} flex justify-between`}>
           Friends {active > 0 && <span className="text-primary">{active} playing</span>}
@@ -44,9 +53,9 @@ export function App() {
         <h2 className={heading}>Signer activity</h2>
         <SignerLog calls={calls.slice(-6).reverse()} name={gameName} />
         <Button
-          variant={settings ? "secondary" : "ghost"}
+          variant={view === "settings" ? "secondary" : "ghost"}
           className="mt-6 w-full justify-start"
-          onClick={() => send({ type: "settings" })}
+          onClick={() => send({ type: "view", view: "settings" })}
         >
           <GearIcon data-icon="inline-start" />
           Presence settings
@@ -55,7 +64,11 @@ export function App() {
       <main className="overflow-y-auto">
         <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background px-7 py-3 text-sm text-muted-foreground">
           <span>
-            {settings ? "Settings / Presence" : `Library${current ? ` / ${current.name}` : ""}`}
+            {view === "budget"
+              ? "Monthly budget"
+              : view === "settings"
+                ? "Settings / Presence"
+                : `Library${current ? ` / ${current.name}` : ""}`}
           </span>
           {npub ? (
             <span className="font-mono text-foreground">
@@ -66,7 +79,15 @@ export function App() {
           )}
         </header>
         <section className="px-7 pt-5 pb-10">
-          {settings ? <PresenceSettings /> : current ? <GamePage game={current} /> : <Library />}
+          {view === "budget" ? (
+            <BudgetPage />
+          ) : view === "settings" ? (
+            <PresenceSettings />
+          ) : current ? (
+            <GamePage game={current} />
+          ) : (
+            <Library />
+          )}
         </section>
       </main>
       <SignRequest />

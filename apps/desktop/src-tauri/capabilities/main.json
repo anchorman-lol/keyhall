@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The launcher window: key setup and game windows. Game windows get their own capability at runtime.",
+  "description": "The launcher window: key setup, game windows and the monthly budget. Game windows get their own capability at runtime.",
   "windows": ["main"],
   "permissions": [
     "core:event:default",
@@ -13,6 +13,11 @@
     "allow-answer-sign-request",
     "allow-sign-event",
     "allow-nip44-encrypt",
-    "allow-nip44-decrypt"
+    "allow-nip44-decrypt",
+    "allow-wallet-status",
+    "allow-connect-wallet",
+    "allow-wallet-pay-request",
+    "allow-wallet-pay-result",
+    "allow-play-sessions"
   ]
 }

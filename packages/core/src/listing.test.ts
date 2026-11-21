@@ -41,8 +41,48 @@ describe("parseListings", () => {
         signIn: "signer",
         depth: "identity",
         repos: [`30617:${"b".repeat(64)}:blockstr`],
+        payTo: [],
       },
     ]);
+  });
+
+  it("pays the listing's lud16 as the listing's author", () => {
+    const game = listing({
+      content: JSON.stringify({ website: "https://x.io", lud16: "dev@x.io" }),
+    });
+    expect(parseListings([game])[0]?.payTo).toEqual([
+      { pubkey: "a".repeat(64), weight: 1, lud16: "dev@x.io" },
+    ]);
+  });
+
+  it("prefers NIP-57 zap tags, weighted, over the lud16", () => {
+    const game = listing({
+      content: JSON.stringify({ website: "https://x.io", lud16: "dev@x.io" }),
+      tags: [
+        ["d", "x"],
+        ["t", "games"],
+        ["zap", "b".repeat(64), "wss://nos.lol", "9"],
+        ["zap", "c".repeat(64), "wss://nos.lol", "1"],
+        ["zap", "not-a-key", "", "5"],
+      ],
+    });
+    expect(parseListings([game])[0]?.payTo).toEqual([
+      { pubkey: "b".repeat(64), weight: 9 },
+      { pubkey: "c".repeat(64), weight: 1 },
+    ]);
+  });
+
+  it("splits evenly between zap tags without weights", () => {
+    const game = listing({
+      tags: [
+        ["d", "x"],
+        ["t", "games"],
+        ["web", "https://x.io"],
+        ["zap", "b".repeat(64)],
+        ["zap", "c".repeat(64)],
+      ],
+    });
+    expect(parseListings([game])[0]?.payTo.map((r) => r.weight)).toEqual([1, 1]);
   });
 
   it("accepts both game and games topic tags, case-insensitively", () => {

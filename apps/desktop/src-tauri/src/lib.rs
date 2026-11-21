@@ -1,11 +1,15 @@
+mod meter;
 mod signer;
+mod wallet;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use nostr::nips::nip44;
+use nostr::nips::nip47::NostrWalletConnectUri;
 use nostr::prelude::{Event, Keys, PublicKey, ToBech32};
 use serde_json::json;
 use tauri::ipc::CapabilityBuilder;
@@ -16,10 +20,12 @@ use tauri::{
 use tokio::sync::oneshot;
 use url::Url;
 
+use meter::{Meter, Session};
 use signer::EventRequest;
 
 const KEYCHAIN_SERVICE: &str = "lol.anchorman.keyhall";
 const KEYCHAIN_ACCOUNT: &str = "nsec";
+const WALLET_ACCOUNT: &str = "nwc";
 const GAME_PERMISSIONS: [&str; 3] = [
     "allow-nostr-get-public-key",
     "allow-nostr-sign-event",
@@ -35,14 +41,15 @@ struct Game {
 #[derive(Default)]
 struct Launcher {
     keys: Mutex<Option<Keys>>,
+    wallet: Mutex<Option<NostrWalletConnectUri>>,
     games: Mutex<HashMap<String, Game>>,
     approved: Mutex<HashSet<(String, u16)>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<bool>>>,
     next_request: AtomicU64,
 }
 
-fn keychain() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(|e| e.to_string())
+fn keychain(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, account).map_err(|e| e.to_string())
 }
 
 fn npub(keys: &Keys) -> String {
@@ -69,7 +76,7 @@ impl Launcher {
     fn stored(&self) -> Result<Option<Keys>, String> {
         let mut cached = self.keys.lock().unwrap();
         if cached.is_none() {
-            match keychain()?.get_password() {
+            match keychain(KEYCHAIN_ACCOUNT)?.get_password() {
                 Ok(nsec) => *cached = Some(Keys::parse(&nsec).map_err(|e| e.to_string())?),
                 Err(keyring::Error::NoEntry) => {}
                 Err(e) => return Err(format!("Keyhall can't read the keychain: {e}")),
@@ -88,10 +95,29 @@ impl Launcher {
             return Err("A key is already stored".into());
         }
         let nsec = keys.secret_key().to_bech32().map_err(|e| e.to_string())?;
-        keychain()?.set_password(&nsec).map_err(|e| e.to_string())?;
+        keychain(KEYCHAIN_ACCOUNT)?
+            .set_password(&nsec)
+            .map_err(|e| e.to_string())?;
         let npub = npub(&keys);
         *self.keys.lock().unwrap() = Some(keys);
         Ok(npub)
+    }
+
+    fn stored_wallet(&self) -> Result<Option<NostrWalletConnectUri>, String> {
+        let mut cached = self.wallet.lock().unwrap();
+        if cached.is_none() {
+            match keychain(WALLET_ACCOUNT)?.get_password() {
+                Ok(uri) => *cached = Some(wallet::parse(&uri)?),
+                Err(keyring::Error::NoEntry) => {}
+                Err(e) => return Err(format!("Keyhall can't read the keychain: {e}")),
+            }
+        }
+        Ok(cached.clone())
+    }
+
+    fn wallet(&self) -> Result<NostrWalletConnectUri, String> {
+        self.stored_wallet()?
+            .ok_or_else(|| "Connect a wallet first".into())
     }
 
     fn game(&self, window: &WebviewWindow) -> Result<Game, String> {
@@ -131,9 +157,47 @@ async fn import_key(app: AppHandle, nsec: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn wallet_status(app: AppHandle) -> Result<Option<String>, String> {
+    keychain_task(app, |l| {
+        Ok(l.stored_wallet()?.as_ref().map(wallet::summary))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn connect_wallet(app: AppHandle, uri: String) -> Result<String, String> {
+    let parsed = wallet::parse(&uri)?;
+    keychain_task(app, move |l| {
+        keychain(WALLET_ACCOUNT)?
+            .set_password(uri.trim())
+            .map_err(|e| e.to_string())?;
+        let summary = wallet::summary(&parsed);
+        *l.wallet.lock().unwrap() = Some(parsed);
+        Ok(summary)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn wallet_pay_request(app: AppHandle, invoice: String) -> Result<serde_json::Value, String> {
+    keychain_task(app, move |l| wallet::pay_request(&l.wallet()?, &invoice)).await
+}
+
+#[tauri::command]
+async fn wallet_pay_result(app: AppHandle, reply: Event) -> Result<String, String> {
+    keychain_task(app, move |l| wallet::pay_result(&l.wallet()?, &reply)).await
+}
+
+#[tauri::command]
+fn play_sessions(meter: State<Mutex<Meter>>) -> Vec<Session> {
+    meter.lock().unwrap().tick(meter::now()).to_vec()
+}
+
+#[tauri::command]
 fn open_game(
     app: AppHandle,
     state: State<Launcher>,
+    meter: State<Mutex<Meter>>,
     name: String,
     coordinate: String,
     url: String,
@@ -151,13 +215,6 @@ fn open_game(
         |c, p| c.permission(*p),
     );
     app.add_capability(capability).map_err(|e| e.to_string())?;
-    state.games.lock().unwrap().insert(
-        label.clone(),
-        Game {
-            name: name.clone(),
-            coordinate: coordinate.clone(),
-        },
-    );
     let parsed = url.parse().map_err(|e: url::ParseError| e.to_string())?;
     let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
         .title(&name)
@@ -165,13 +222,27 @@ fn open_game(
         .initialization_script(&shim)
         .build()
         .map_err(|e| e.to_string())?;
+    meter
+        .lock()
+        .unwrap()
+        .start(&label, &coordinate, meter::now());
     let closed = label.clone();
+    let coordinate_closed = coordinate.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::Destroyed = event {
+            app.state::<Mutex<Meter>>()
+                .lock()
+                .unwrap()
+                .stop(&closed, meter::now());
             app.state::<Launcher>().games.lock().unwrap().remove(&closed);
-            let _ = app.emit_to("main", "closed", json!({"coordinate": coordinate}));
+            let _ = app.emit_to("main", "closed", json!({"coordinate": coordinate_closed}));
         }
     });
+    state
+        .games
+        .lock()
+        .unwrap()
+        .insert(label.clone(), Game { name, coordinate });
     Ok(label)
 }
 
@@ -282,6 +353,22 @@ fn nostr_observe(
 pub fn run() {
     tauri::Builder::default()
         .manage(Launcher::default())
+        .setup(|app| {
+            let path = app.path().app_data_dir()?.join("playtime.json");
+            app.manage(Mutex::new(Meter::load(path)));
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(Duration::from_secs(30));
+                    handle
+                        .state::<Mutex<Meter>>()
+                        .lock()
+                        .unwrap()
+                        .tick(meter::now());
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             key_status,
             generate_key,
@@ -292,6 +379,11 @@ pub fn run() {
             sign_event,
             nip44_encrypt,
             nip44_decrypt,
+            wallet_status,
+            connect_wallet,
+            wallet_pay_request,
+            wallet_pay_result,
+            play_sessions,
             nostr_get_public_key,
             nostr_sign_event,
             nostr_observe

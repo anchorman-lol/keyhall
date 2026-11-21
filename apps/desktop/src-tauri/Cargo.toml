@@ -14,7 +14,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tokio = { version = "1", features = ["sync"] }
-nostr = { version = "0.45", default-features = false, features = ["std", "os-rng", "nip44"] }
+nostr = { version = "0.45", default-features = false, features = [
+  "std",
+  "os-rng",
+  "nip44",
+  "nip47",
+] }
 keyring = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

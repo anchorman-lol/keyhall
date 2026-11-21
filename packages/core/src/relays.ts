@@ -4,6 +4,7 @@ import type { Event } from "nostr-tools/pure";
 import { listsFor, type CuratorList, type ListRef } from "./curation";
 import { lastUpdated, parseListings, type Game } from "./listing";
 import type { Friend } from "./presence";
+import { payOverNwc, zapInvoice, type Payment, type WalletRequest } from "./zap";
 
 const RELAYS = [
   "wss://relay.damus.io",
@@ -108,4 +109,28 @@ export async function fetchLastUpdated(game: Game): Promise<number> {
       );
   }
   return lastUpdated(...times);
+}
+
+async function fetchLud16(pubkey: string): Promise<string | undefined> {
+  const profile = await pool.get(RELAYS, { kinds: [0], authors: [pubkey] }, { maxWait: 4000 });
+  try {
+    const { lud16 } = JSON.parse(profile?.content ?? "{}") as Record<string, unknown>;
+    return typeof lud16 === "string" ? lud16 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function zap(
+  payment: Payment,
+  comment: string,
+  wallet: {
+    request(invoice: string): Promise<WalletRequest>;
+    result(reply: Event): Promise<string>;
+  },
+) {
+  const lud16 = payment.lud16 ?? (await fetchLud16(payment.pubkey));
+  if (!lud16) throw new Error("The developer's profile has no lightning address");
+  const invoice = await zapInvoice(fetch, { ...payment, lud16 }, comment, RELAYS);
+  await payOverNwc(await wallet.request(invoice), pool, wallet.result);
 }
