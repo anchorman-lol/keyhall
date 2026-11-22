@@ -11,6 +11,7 @@
     "lint": "oxlint --deny-warnings",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
+    "picks:publish": "pnpm --filter @keyhall/core picks:publish",
     "gate": "pnpm lint && pnpm fmt:check && pnpm check-types && pnpm test && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && pnpm build"
   },
   "devDependencies": {

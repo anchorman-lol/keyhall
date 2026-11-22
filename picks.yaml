@@ -1,0 +1,14 @@
+# Keyhall picks: the games-default list (kind 30267) under the project's key.
+# Only the maintainer edits this file. Each pick is a folder in games/; publish with `pnpm picks:publish`.
+- id: gorilator
+  note: A decent game, if a bit hard to understand.
+- jester
+- knight
+- id: nochess
+  note: The maintainer's own game.
+- parlour
+- id: sanki
+  note: Really well done.
+- splash
+- unicorn
+- xenophon
