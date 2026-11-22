@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [main, worktree-keyhall-readme-release]
+    branches: [main]
 
 permissions:
   contents: write
