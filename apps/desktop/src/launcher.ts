@@ -7,10 +7,13 @@ import {
   fetchListings,
   fetchLists,
   fetchProfile,
+  probeRelay,
   publish,
+  setRelays,
   subscribe,
   zap,
 } from "@keyhall/core/relays";
+import { loadRelays } from "@keyhall/core/relaySettings";
 import { loadSources } from "@keyhall/core/sources";
 import { shimScript } from "@keyhall/core/shim";
 import { invoke } from "@tauri-apps/api/core";
@@ -38,6 +41,9 @@ export function useNow() {
   }, []);
   return now;
 }
+
+const relays = loadRelays(JSON.parse(localStorage.getItem("relays") ?? "null"));
+setRelays(relays);
 
 const machine = launcherMachine(
   {
@@ -80,6 +86,11 @@ const machine = launcherMachine(
     },
     saveObserved: (observed) => localStorage.setItem("observed", JSON.stringify(observed)),
     saveSources: (sources) => localStorage.setItem("sources", JSON.stringify(sources)),
+    saveRelays: (relays) => {
+      setRelays(relays);
+      localStorage.setItem("relays", JSON.stringify(relays));
+    },
+    probeRelay,
     fetchFriends,
     fetchProfile,
     saveFriendsOpen: (open) => localStorage.setItem("friendsOpen", JSON.stringify(open)),
@@ -102,6 +113,7 @@ const machine = launcherMachine(
   {
     observed: JSON.parse(localStorage.getItem("observed") ?? "{}"),
     sources: loadSources(JSON.parse(localStorage.getItem("sources") ?? "null")),
+    relays,
     budget: JSON.parse(localStorage.getItem("budget") ?? "null") ?? undefined,
     friendsOpen: JSON.parse(localStorage.getItem("friendsOpen") ?? "null") ?? undefined,
     ...JSON.parse(localStorage.getItem("presence") ?? "{}"),

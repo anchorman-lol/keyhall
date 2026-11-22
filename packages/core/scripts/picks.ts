@@ -9,10 +9,10 @@ import { hexToBytes } from "nostr-tools/utils";
 import { listingEvent, parseGame, parsePicks, picksEvent } from "../src/catalog";
 import { PICKS_PUBKEY } from "../src/curation";
 import { parseListings } from "../src/listing";
-import { RELAYS } from "../src/relays";
+import { DEFAULT_RELAYS } from "../src/relaySettings";
 
 const IMAGES = "https://anchorman-lol.github.io/keyhall/games";
-const PUBLISH_RELAYS = ["wss://relay.anchorman.lol", ...RELAYS];
+const PUBLISH_RELAYS = DEFAULT_RELAYS.map((r) => r.url);
 const root = new URL("../../../", import.meta.url);
 
 const { values } = parseArgs({

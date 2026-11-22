@@ -9,7 +9,7 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Launcher } from "./launcher.ts";
 
-const VIEWS = { budget: "Monthly budget", settings: "Settings" };
+const VIEWS = { budget: "Monthly budget", settings: "Settings", relays: "Settings" };
 const CONTROLS = [
   {
     label: "Minimize",

@@ -155,7 +155,7 @@ export function Nav() {
           <Item
             icon={GearSixIcon}
             label="Settings"
-            active={view === "settings"}
+            active={view === "settings" || view === "relays"}
             onClick={() => send({ type: "view", view: "settings" })}
           />
         </nav>
