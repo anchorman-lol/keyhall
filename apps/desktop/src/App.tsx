@@ -34,7 +34,10 @@ export function App() {
   return (
     <div className="grid h-screen grid-cols-[72px_minmax(0,1fr)_264px] text-[13px]">
       <Nav />
-      <div className="min-h-0 min-w-0">
+      <div className="relative min-h-0 min-w-0">
+        {(view || current) && (
+          <div data-tauri-drag-region className="absolute inset-x-0 top-0 z-10 mr-3 h-[52px]" />
+        )}
         {view === "budget" ? (
           <div className="h-full overflow-y-auto px-8 pt-6 pb-10">
             <BudgetPage />

@@ -31,7 +31,10 @@ export function FriendsColumn() {
   const heading = "flex h-7 items-center px-2 text-[12px] font-medium text-muted-foreground";
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-white/[0.06] bg-sidebar">
-      <header className="flex h-[52px] shrink-0 items-center gap-2 border-b border-white/[0.06] px-5">
+      <header
+        data-tauri-drag-region="deep"
+        className="flex h-[52px] shrink-0 items-center gap-2 border-b border-white/[0.06] px-5"
+      >
         <span className="text-[13px] font-semibold">Friends</span>
         {active.length > 0 && (
           <span className="text-[12px] text-muted-foreground">{active.length} playing</span>

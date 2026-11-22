@@ -117,7 +117,7 @@ export function GamePage({ game }: { game: Game }) {
         variant="ghost"
         size="sm"
         onClick={() => send({ type: "select" })}
-        className="absolute top-3 left-4 z-10 rounded-lg bg-black/45 text-white backdrop-blur-sm hover:bg-black/60"
+        className="absolute top-3 left-4 z-20 rounded-lg bg-black/45 text-white backdrop-blur-sm hover:bg-black/60"
       >
         <ArrowLeftIcon data-icon="inline-start" /> Library
       </Button>

@@ -129,7 +129,10 @@ function Toolbar({
   const active = activeFilters(filters);
   return (
     <>
-      <header className="flex h-[52px] shrink-0 items-center gap-2 border-b border-white/[0.06] px-6">
+      <header
+        data-tauri-drag-region="deep"
+        className="flex h-[52px] shrink-0 items-center gap-2 border-b border-white/[0.06] px-6"
+      >
         <h1 className="text-[15px] font-semibold">Library</h1>
         <span className="text-muted-foreground tabular-nums">{count}</span>
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
