@@ -1,70 +1,98 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { Layout } from "./config.ts";
+import { GamePage, WidePane } from "./Detail.tsx";
 import { FriendsColumn } from "./FriendsColumn.tsx";
-import { Inspector } from "./Inspector.tsx";
 import { Library } from "./Library.tsx";
-import { Dock, StatusBar } from "./Running.tsx";
-import { Sidebar } from "./Sidebar.tsx";
+import { Nav, NAV_W } from "./Nav.tsx";
+import { OtherPage } from "./Pages.tsx";
+import { Dock, RequestBanner, StatusBar } from "./Running.tsx";
 import { useWin } from "./state.tsx";
 
-const SIDEBAR_W = { sources: 240, switches: 228, rail: 72 };
+type Main = "library" | "game" | "detail" | "page";
 
 /** Which regions are on screen and how wide each is, from the layout and the window's state. */
 export function regions(l: Layout) {
-  const inspector = l.inspector !== "none" && l.selected !== null;
-  const bottom = l.bottom === "dock" ? (l.playing ? 84 : 0) : l.bottom === "status" ? 34 : 0;
-  const cols: [string, string][] = [
-    ["sidebar", `${SIDEBAR_W[l.sidebar]}px`],
-    [
-      "library",
-      inspector && l.inspector === "wide"
-        ? l.density === "compact"
-          ? "360px"
-          : "384px"
-        : "minmax(0,1fr)",
-    ],
-  ];
-  if (inspector) cols.push(["inspector", l.inspector === "wide" ? "minmax(0,1fr)" : "420px"]);
-  if (l.friends === "column") cols.push(["friends", "264px"]);
-  return { cols, bottom };
+  const open = l.page === "library" && l.selected !== null;
+  const main: [Main, string][] =
+    l.page !== "library"
+      ? [["page", "minmax(0,1fr)"]]
+      : open && l.detail === "page"
+        ? [["game", "minmax(0,1fr)"]]
+        : open && l.detail === "wide"
+          ? [
+              ["library", l.density === "compact" ? "360px" : "384px"],
+              ["detail", "minmax(0,1fr)"],
+            ]
+          : [["library", "minmax(0,1fr)"]];
+  return {
+    nav: `${NAV_W[l.nav]}px`,
+    main,
+    friends: l.friends === "column" && l.page !== "friends",
+    banner: l.playing && l.signing && l.running === "nav" && l.nav !== "sidebar",
+    bottom: l.bottom === "dock" ? (l.playing ? 84 : 0) : l.bottom === "status" ? 34 : 0,
+  };
 }
 
-function Region({ name, col, children }: { name: string; col: number; children: ReactNode }) {
+function Region({
+  name,
+  style,
+  children,
+}: {
+  name: string;
+  style: CSSProperties;
+  children: ReactNode;
+}) {
   return (
-    <div data-region={name} className="min-h-0 min-w-0" style={{ gridColumn: col, gridRow: 1 }}>
+    <div data-region={name} className="min-h-0 min-w-0" style={style}>
       {children}
     </div>
   );
 }
 
+const VIEW: Record<Main, () => ReactNode> = {
+  library: Library,
+  game: GamePage,
+  detail: WidePane,
+  page: OtherPage,
+};
+
 export function Shell() {
   const { layout } = useWin();
-  const { cols, bottom } = regions(layout);
-  const banner =
-    layout.signing && layout.playing && layout.running === "sidebar" && layout.sidebar === "rail";
-  const view: Record<string, ReactNode> = {
-    sidebar: <Sidebar />,
-    library: <Library banner={banner} />,
-    inspector: <Inspector />,
-    friends: <FriendsColumn />,
-  };
+  const r = regions(layout);
+  const top = r.banner ? 2 : 1;
+  const span = `1 / span ${top}`;
+  const cols = [r.nav, ...r.main.map(([, w]) => w), ...(r.friends ? ["264px"] : [])];
+  const rows = [r.banner && "52px", "minmax(0,1fr)", r.bottom && `${r.bottom}px`].filter(Boolean);
   return (
     <div
       className="grid h-full"
-      style={{
-        gridTemplateColumns: cols.map(([, w]) => w).join(" "),
-        gridTemplateRows: bottom ? `minmax(0,1fr) ${bottom}px` : "minmax(0,1fr)",
-      }}
+      style={{ gridTemplateColumns: cols.join(" "), gridTemplateRows: rows.join(" ") }}
     >
-      {cols.map(([name], i) => (
-        <Region key={name} name={name} col={i + 1}>
-          {view[name]}
+      <Region name="nav" style={{ gridColumn: 1, gridRow: span, zIndex: 40 }}>
+        <Nav />
+      </Region>
+      {r.banner && (
+        <Region name="banner" style={{ gridColumn: `2 / span ${r.main.length}`, gridRow: 1 }}>
+          <RequestBanner />
         </Region>
-      ))}
-      {bottom > 0 && (
-        <div data-region="bottom" className="min-w-0" style={{ gridColumn: "1 / -1", gridRow: 2 }}>
+      )}
+      {r.main.map(([name], i) => {
+        const V = VIEW[name];
+        return (
+          <Region key={name} name={name} style={{ gridColumn: i + 2, gridRow: top }}>
+            <V />
+          </Region>
+        );
+      })}
+      {r.friends && (
+        <Region name="friends" style={{ gridColumn: cols.length, gridRow: span }}>
+          <FriendsColumn />
+        </Region>
+      )}
+      {r.bottom > 0 && (
+        <Region name="bottom" style={{ gridColumn: "1 / -1", gridRow: top + 1 }}>
           {layout.bottom === "dock" ? <Dock /> : <StatusBar />}
-        </div>
+        </Region>
       )}
     </div>
   );

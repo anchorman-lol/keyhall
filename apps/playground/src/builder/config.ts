@@ -1,39 +1,71 @@
 export type Option<V extends string> = { value: V; label: string; hint: string };
 
-export const SIDEBAR = [
+export const NAV = [
   {
-    value: "sources",
-    label: "Source list",
-    hint: "Mail-style: library views, then each source as a row with its count.",
+    value: "labels",
+    label: "Labelled rail",
+    hint: "The rail's icons with a short label under each, 84 px.",
   },
   {
-    value: "switches",
-    label: "Switches",
-    hint: "Compact navigation, sources with on/off switches.",
+    value: "hover",
+    label: "Hover rail",
+    hint: "A 72 px rail that opens over the library with labels while you hover or tab into it.",
   },
-  { value: "rail", label: "Icon rail", hint: "A 72 px rail of icons and curator faces." },
+  {
+    value: "sidebar",
+    label: "Slim sidebar",
+    hint: "A 200 px sidebar with icon and name on each row.",
+  },
+  { value: "icons", label: "Icon rail", hint: "Round 3's rail, icons only, for comparison." },
 ] as const satisfies Option<string>[];
 
 export const MAIN = [
+  { value: "grid", label: "Cover grid", hint: "Cover art first." },
   {
     value: "list",
-    label: "Grouped list",
-    hint: "Playing now, Friends are in, Recently played, Not played yet.",
+    label: "List",
+    hint: "Grouped rows; a table with Source, Friends, This month and Last played once it is wide enough.",
   },
-  { value: "grid", label: "Cover grid", hint: "Cover art first, sorted by last played." },
 ] as const satisfies Option<string>[];
 
-export const INSPECTOR = [
-  { value: "pane", label: "Right pane", hint: "A 420 px pane beside the library." },
+export const FILTERBAR = [
+  {
+    value: "toolbar",
+    label: "Toolbar",
+    hint: "One row: search, a Sources menu, a Filters menu and sort. What you picked shows as chips.",
+  },
+  {
+    value: "chips",
+    label: "Chip rows",
+    hint: "Search and sort, then every source and filter as a chip you can see and tap.",
+  },
+  {
+    value: "tabs",
+    label: "Source tabs",
+    hint: "Sources as tabs along the top, search and a Filters menu beside them.",
+  },
+] as const satisfies Option<string>[];
+
+export const DETAIL = [
+  {
+    value: "page",
+    label: "Game page",
+    hint: "The game takes the whole library area with a big hero; Library takes you back.",
+  },
+  {
+    value: "expand",
+    label: "In place",
+    hint: "The game opens inside the library, under the row you clicked.",
+  },
+  {
+    value: "sheet",
+    label: "Slide-over",
+    hint: "A sheet slides in from the right over the library, which stays where it was.",
+  },
   {
     value: "wide",
     label: "Wide pane",
-    hint: "The game takes the room, the library narrows to a column.",
-  },
-  {
-    value: "none",
-    label: "None",
-    hint: "Selecting a game does nothing here; the library fills the window.",
+    hint: "Round 3's wide pane: the library narrows to a column.",
   },
 ] as const satisfies Option<string>[];
 
@@ -61,18 +93,25 @@ export const BOTTOM = [
 
 export const FRIENDS_AT = [
   { value: "column", label: "Right column", hint: "A full column: playing, online, offline." },
-  { value: "sidebar", label: "In the sidebar", hint: "Who's playing, under the sources." },
   {
-    value: "inspector",
-    label: "Inspector only",
-    hint: "Only on a game's page: who plays this one.",
+    value: "nav",
+    label: "In the nav",
+    hint: "Who's playing, under the destinations: rows in the sidebar, faces on a rail.",
   },
-  { value: "none", label: "None", hint: "No friends anywhere." },
+  {
+    value: "page",
+    label: "Friends page",
+    hint: "Only behind Friends in the navigation, and on each game.",
+  },
 ] as const satisfies Option<string>[];
 
 export const RUNNING_AT = [
+  {
+    value: "nav",
+    label: "Nav card",
+    hint: "A card at the foot of the navigation; on a rail it shrinks to the cover.",
+  },
   { value: "dock", label: "Dock", hint: "Uses the now-playing dock." },
-  { value: "sidebar", label: "Sidebar card", hint: "A card at the foot of the sidebar." },
   { value: "status", label: "Status bar", hint: "A segment at the left of the status bar." },
 ] as const satisfies Option<string>[];
 
@@ -81,43 +120,58 @@ export const DENSITY = [
   { value: "compact", label: "Compact", hint: "" },
 ] as const satisfies Option<string>[];
 
+export const PAGES = [
+  { value: "library", label: "Library", hint: "" },
+  { value: "friends", label: "Friends", hint: "" },
+  { value: "budget", label: "Budget", hint: "" },
+  { value: "settings", label: "Settings", hint: "" },
+] as const satisfies Option<string>[];
+
 export const SELECTABLE = ["forgerealms", "neonsentinel", "nochess", "pallasite"] as const;
 
 type V<T extends readonly { value: string }[]> = T[number]["value"];
-export type Sidebar = V<typeof SIDEBAR>;
+export type Nav = V<typeof NAV>;
 export type Main = V<typeof MAIN>;
-export type InspectorAt = V<typeof INSPECTOR>;
+export type FilterBar = V<typeof FILTERBAR>;
+export type Detail = V<typeof DETAIL>;
 export type Section = V<typeof SECTIONS>;
 export type Bottom = V<typeof BOTTOM>;
 export type FriendsAt = V<typeof FRIENDS_AT>;
 export type RunningAt = V<typeof RUNNING_AT>;
 export type Density = V<typeof DENSITY>;
+export type PageId = V<typeof PAGES>;
 
 export type Layout = {
-  sidebar: Sidebar;
+  nav: Nav;
   main: Main;
-  inspector: InspectorAt;
+  filterbar: FilterBar;
+  detail: Detail;
   sections: Section[];
   bottom: Bottom;
   friends: FriendsAt;
   running: RunningAt;
   density: Density;
+  page: PageId;
   playing: boolean;
   signing: boolean;
+  filtered: boolean;
   selected: string | null;
 };
 
 export const DEFAULT: Layout = {
-  sidebar: "sources",
-  main: "list",
-  inspector: "pane",
-  sections: ["trust", "stats", "friends", "listing"],
-  bottom: "dock",
-  friends: "sidebar",
-  running: "dock",
+  nav: "labels",
+  main: "grid",
+  filterbar: "toolbar",
+  detail: "wide",
+  sections: ["trust", "stats", "friends", "signatures", "listing"],
+  bottom: "none",
+  friends: "column",
+  running: "nav",
   density: "comfortable",
+  page: "library",
   playing: true,
   signing: false,
+  filtered: false,
   selected: "forgerealms",
 };
 
@@ -126,27 +180,28 @@ export function apply(layout: Layout, patch: Partial<Layout>): Layout {
   const next = { ...layout, ...patch };
   if (patch.running === "dock") next.bottom = "dock";
   if (patch.running === "status") next.bottom = "status";
-  if (patch.running === "sidebar" && next.bottom === "dock") next.bottom = "status";
+  if (patch.running === "nav" && next.bottom === "dock") next.bottom = "none";
   if (patch.bottom === "dock") next.running = "dock";
   if (patch.bottom === "status" && next.running === "dock") next.running = "status";
-  if (patch.bottom === "none" && next.running !== "sidebar") next.running = "sidebar";
-  if (patch.friends === "inspector" && !next.sections.includes("friends"))
-    next.sections = [...next.sections, "friends"];
+  if (patch.bottom === "none" && next.running !== "nav") next.running = "nav";
   if (!next.playing) next.signing = false;
   return next;
 }
 
 const ORDER: (keyof Layout)[] = [
-  "sidebar",
+  "nav",
   "main",
-  "inspector",
+  "filterbar",
+  "detail",
   "sections",
   "bottom",
   "friends",
   "running",
   "density",
+  "page",
   "playing",
   "signing",
+  "filtered",
   "selected",
 ];
 
@@ -164,23 +219,26 @@ const pick = <T extends string>(options: readonly { value: T }[], v: string | nu
 
 export function fromHash(hash: string): Layout | null {
   const p = new URLSearchParams(hash.replace(/^#/, ""));
-  if (!p.has("sidebar")) return null;
+  if (!p.has("nav")) return null;
   const sel = p.get("selected");
   const sections = p.has("sections")
     ? SECTIONS.map((s) => s.value).filter((s) => p.get("sections")!.split(",").includes(s))
     : DEFAULT.sections;
   return apply(
     {
-      sidebar: pick(SIDEBAR, p.get("sidebar"), DEFAULT.sidebar),
+      nav: pick(NAV, p.get("nav"), DEFAULT.nav),
       main: pick(MAIN, p.get("main"), DEFAULT.main),
-      inspector: pick(INSPECTOR, p.get("inspector"), DEFAULT.inspector),
+      filterbar: pick(FILTERBAR, p.get("filterbar"), DEFAULT.filterbar),
+      detail: pick(DETAIL, p.get("detail"), DEFAULT.detail),
       sections,
       bottom: pick(BOTTOM, p.get("bottom"), DEFAULT.bottom),
       friends: pick(FRIENDS_AT, p.get("friends"), DEFAULT.friends),
       running: pick(RUNNING_AT, p.get("running"), DEFAULT.running),
       density: pick(DENSITY, p.get("density"), DEFAULT.density),
+      page: pick(PAGES, p.get("page"), DEFAULT.page),
       playing: p.get("playing") !== "false",
       signing: p.get("signing") === "true",
+      filtered: p.get("filtered") === "true",
       selected: sel && sel !== "none" ? sel : null,
     },
     {},
@@ -194,17 +252,20 @@ export function spec(l: Layout, gameName: (id: string) => string, notes: string,
   const sections = l.sections.map((s) => label(SECTIONS, s)).join(", ") || "no sections";
   return [
     "Keyhall layout",
-    `Left sidebar: ${label(SIDEBAR, l.sidebar)}`,
+    `Navigation: ${label(NAV, l.nav)}`,
     `Main area: ${label(MAIN, l.main)}`,
-    `Inspector: ${label(INSPECTOR, l.inspector)}${l.inspector === "none" ? "" : ` (${sections})`}`,
+    `Filter bar: ${label(FILTERBAR, l.filterbar)}`,
+    `Game detail: ${label(DETAIL, l.detail)} (${sections})`,
     `Bottom: ${label(BOTTOM, l.bottom)}`,
     `Friends: ${label(FRIENDS_AT, l.friends)}`,
     `Running game: ${label(RUNNING_AT, l.running)}`,
     `Density: ${label(DENSITY, l.density)}`,
     `Previewed with: ${[
+      `the ${label(PAGES, l.page)} page`,
       l.playing ? "a game running" : "nothing running",
       l.signing && "a signing request",
-      l.selected ? `${gameName(l.selected)} selected` : "no selection",
+      l.filtered && "filters applied",
+      l.selected ? `${gameName(l.selected)} open` : "no game open",
     ]
       .filter(Boolean)
       .join(", ")}`,

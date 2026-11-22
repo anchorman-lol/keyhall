@@ -23,7 +23,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export function FriendsColumn() {
-  const { compact, set, presence, setPresence, running } = useWin();
+  const { compact, open, presence, setPresence, running } = useWin();
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col border-l border-white/[0.06] bg-sidebar [--ring-bg:var(--sidebar)]">
       <header className="flex h-[52px] shrink-0 items-center gap-2 border-b border-white/[0.06] pr-3 pl-5">
@@ -55,7 +55,7 @@ export function FriendsColumn() {
                 key={f.handle}
                 role="button"
                 tabIndex={0}
-                onClick={() => set({ selected: g.id })}
+                onClick={() => open(g.id)}
                 className={cn(
                   "group/friend flex cursor-default items-center gap-3 rounded-lg px-2 hover:bg-white/[0.04]",
                   compact ? "py-1.5" : "py-2",

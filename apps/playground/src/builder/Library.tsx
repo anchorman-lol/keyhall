@@ -1,12 +1,14 @@
 import { Button } from "@keyhall/ui/components/button";
 import { cn } from "@keyhall/ui/lib/utils";
-import { CaretDownIcon, GridFourIcon, MagnifyingGlassIcon, RowsIcon } from "@phosphor-icons/react";
-import { friendsIn, RUNNING, SOURCES, source, type Game } from "../data.ts";
+import { EyeSlashIcon } from "@phosphor-icons/react";
+import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { friendsIn, RUNNING, source, UNVETTED, type Game } from "../data.ts";
 import { Avatar, Cover, Live } from "../kit.tsx";
-import { RequestBanner } from "./Running.tsx";
-import { byRecency, groups, useWin, viewTitle, visibleGames } from "./state.tsx";
+import { Expanded, Sheet } from "./Detail.tsx";
+import { LibraryHeader } from "./FilterBar.tsx";
+import { groups, useWin, visibleGames } from "./state.tsx";
 
-export const lastPlayed = (g: Game, running: Game | null) =>
+const lastPlayed = (g: Game, running: Game | null) =>
   g.lastPlayed === "Now" && running?.id !== g.id ? "Today" : g.lastPlayed;
 
 const hours = (m?: number) =>
@@ -37,39 +39,39 @@ function Status({ game }: { game: Game }) {
         <Live className="size-1.5" /> {RUNNING.session}
       </span>
     );
-  const here = friendsIn(game.id);
-  if (here.length) return <Faces game={game} />;
+  if (friendsIn(game.id).length) return <Faces game={game} />;
   return (
     <span className="text-[12px] text-muted-foreground">{lastPlayed(game, running) ?? "New"}</span>
   );
 }
 
 function useSelect(game: Game) {
-  const { layout, set } = useWin();
+  const { layout, open } = useWin();
   const selected = layout.selected === game.id;
   return {
     selected,
     props: {
       role: "button",
       tabIndex: 0,
-      "aria-pressed": selected,
+      "aria-expanded": selected,
       "data-game": game.id,
-      onClick: () => set({ selected: selected ? null : game.id }),
-      onKeyDown: (e: React.KeyboardEvent) => e.key === "Enter" && set({ selected: game.id }),
+      onClick: () => open(selected ? null : game.id),
+      onKeyDown: (e: React.KeyboardEvent) => e.key === "Enter" && open(game.id),
     },
   };
 }
 
+const TABLE = "@min-[720px]:grid-cols-[auto_minmax(0,1.5fr)_minmax(0,1fr)_72px_88px_96px]";
+
 function ListRow({ game }: { game: Game }) {
   const { compact, running } = useWin();
   const { selected, props } = useSelect(game);
-  const here = friendsIn(game.id);
   return (
     <div
       {...props}
       className={cn(
-        "group/row grid cursor-default items-center gap-3 rounded-lg px-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60",
-        "grid-cols-[auto_minmax(0,1fr)_auto] @min-[720px]:grid-cols-[auto_minmax(0,1.5fr)_minmax(0,1fr)_72px_88px_96px]",
+        "group/row grid cursor-default grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60",
+        TABLE,
         compact ? "py-1" : "py-1.5",
         selected
           ? "bg-primary/[0.12] ring-1 ring-primary/30 [--ring-bg:#2a2719]"
@@ -96,7 +98,9 @@ function ListRow({ game }: { game: Game }) {
       <div className="hidden truncate text-[12px] text-muted-foreground @min-[720px]:block">
         {source(game.source).name}
       </div>
-      <div className="hidden @min-[720px]:block">{here.length > 0 && <Faces game={game} />}</div>
+      <div className="hidden @min-[720px]:block">
+        <Faces game={game} />
+      </div>
       <div className="hidden text-right text-[12px] text-muted-foreground tabular-nums @min-[720px]:block">
         {hours(game.minutes)}
       </div>
@@ -107,11 +111,17 @@ function ListRow({ game }: { game: Game }) {
   );
 }
 
-function List() {
-  const { view, on, running, compact } = useWin();
+function List({ games }: { games: Game[] }) {
+  const { layout, running, compact, filters } = useWin();
+  const inPlace = layout.detail === "expand";
   return (
     <div className={cn("pb-6", compact ? "px-3" : "px-4")}>
-      <div className="sticky top-0 z-10 hidden h-8 grid-cols-[auto_minmax(0,1.5fr)_minmax(0,1fr)_72px_88px_96px] items-center gap-3 bg-background px-2 text-[11px] font-medium text-muted-foreground @min-[720px]:grid">
+      <div
+        className={cn(
+          "sticky top-0 z-10 hidden h-8 items-center gap-3 bg-background px-2 text-[11px] font-medium text-muted-foreground @min-[720px]:grid",
+          TABLE,
+        )}
+      >
         <span className={compact ? "w-[52px]" : "w-[68px]"} />
         <span>Game</span>
         <span>Source</span>
@@ -119,7 +129,7 @@ function List() {
         <span className="text-right">This month</span>
         <span className="pr-1 text-right">Last played</span>
       </div>
-      {groups(visibleGames(view, on), running).map((g) => (
+      {groups(games, running, filters.sort).map((g) => (
         <section key={g.title} className={compact ? "mt-2" : "mt-3"}>
           <h3 className="flex h-7 items-center gap-2 px-2 text-[12px] font-medium text-muted-foreground">
             {g.title}
@@ -129,7 +139,14 @@ function List() {
           </h3>
           <div className="grid gap-px">
             {g.games.map((game) => (
-              <ListRow key={game.id} game={game} />
+              <Fragment key={game.id}>
+                <ListRow game={game} />
+                {inPlace && layout.selected === game.id && (
+                  <div className="pt-2 pb-3">
+                    <Expanded />
+                  </div>
+                )}
+              </Fragment>
             ))}
           </div>
         </section>
@@ -178,13 +195,31 @@ function Tile({ game }: { game: Game }) {
   );
 }
 
-function Grid() {
-  const { view, on, compact, running } = useWin();
-  const games = visibleGames(view, on).sort(
-    (a, b) => Number(b.id === running?.id) - Number(a.id === running?.id) || byRecency(a, b),
-  );
+/** Columns the auto-fill grid currently has, so an in-place detail can follow the clicked row. */
+function useColumns() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [cols, setCols] = useState(4);
+  useLayoutEffect(() => {
+    const el = ref.current!;
+    const measure = () =>
+      setCols(getComputedStyle(el).gridTemplateColumns.split(" ").filter(Boolean).length || 1);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, []);
+  return { ref, cols };
+}
+
+function Grid({ games }: { games: Game[] }) {
+  const { layout, compact } = useWin();
+  const { ref, cols } = useColumns();
+  const at = layout.detail === "expand" ? games.findIndex((g) => g.id === layout.selected) : -1;
+  const after =
+    at === -1 ? -1 : Math.min(games.length - 1, Math.floor(at / cols) * cols + cols - 1);
   return (
     <div
+      ref={ref}
       className={cn(
         "grid content-start",
         compact
@@ -192,82 +227,66 @@ function Grid() {
           : "grid-cols-[repeat(auto-fill,minmax(184px,1fr))] gap-x-5 gap-y-6 px-6 pt-5 pb-8 @max-[480px]:grid-cols-[repeat(auto-fill,minmax(140px,1fr))] @max-[480px]:gap-x-4",
       )}
     >
-      {games.map((g) => (
-        <Tile key={g.id} game={g} />
+      {games.map((g, i) => (
+        <Fragment key={g.id}>
+          <Tile game={g} />
+          {i === after && <Expanded notch={(((at % cols) + 0.5) / cols) * 100} />}
+        </Fragment>
       ))}
     </div>
   );
 }
 
-export function Library({ banner }: { banner: boolean }) {
-  const { layout, set, view, on, compact } = useWin();
-  const count = visibleGames(view, on).length;
-  const sourcesOn = SOURCES.filter((s) => on[s.id]).length;
+function Note({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return (
-    <main className="@container flex h-full min-h-0 min-w-0 flex-col bg-background [--ring-bg:var(--background)]">
-      <header
-        className={cn(
-          "flex h-[52px] shrink-0 items-center gap-3 border-b border-white/[0.06]",
-          compact ? "px-5" : "px-6",
-        )}
-      >
-        <h1 className="truncate text-[15px] font-semibold tracking-[-0.01em]">{viewTitle(view)}</h1>
-        <span className="text-muted-foreground tabular-nums">{count}</span>
-        {view === "all" && (
-          <span className="hidden truncate text-[12px] text-muted-foreground @min-[560px]:inline">
-            from {sourcesOn} of {SOURCES.length} sources
-          </span>
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <div className="hidden h-8 w-56 items-center gap-2 rounded-md bg-white/[0.05] px-2.5 text-muted-foreground ring-1 ring-white/[0.04] @min-[640px]:flex">
-            <MagnifyingGlassIcon className="size-4" />
-            <span className="flex-1 text-[13px]">Search</span>
-            <kbd className="font-sans text-[11px]">⌘K</kbd>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Search"
-            className="text-muted-foreground @min-[640px]:hidden"
-          >
-            <MagnifyingGlassIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="hidden text-muted-foreground @min-[420px]:inline-flex"
-          >
-            Last played <CaretDownIcon data-icon="inline-end" />
-          </Button>
-          <div className="flex rounded-md bg-white/[0.05] p-0.5">
-            {(
-              [
-                ["grid", GridFourIcon, "Cover grid"],
-                ["list", RowsIcon, "Grouped list"],
-              ] as const
-            ).map(([v, Icon, label]) => (
-              <button
-                key={v}
-                aria-label={label}
-                aria-pressed={layout.main === v}
-                onClick={() => set({ main: v })}
-                className={cn(
-                  "grid size-7 place-items-center rounded transition-colors",
-                  layout.main === v
-                    ? "bg-white/[0.09] text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Icon className="size-4" />
-              </button>
-            ))}
-          </div>
+    <div className="mx-6 mb-8 flex items-start gap-3.5 rounded-xl px-5 py-4 outline-1 -outline-offset-1 outline-white/15 outline-dashed">
+      <span className="mt-0.5 text-muted-foreground">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium">{title}</div>
+        <div className="mt-0.5 max-w-[64ch] text-[12px] leading-relaxed text-muted-foreground text-pretty">
+          {children}
         </div>
-      </header>
-      {banner && <RequestBanner />}
-      <div data-scroll className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
-        {layout.main === "list" ? <List /> : <Grid />}
       </div>
+    </div>
+  );
+}
+
+export function Library() {
+  const { layout, filters, running, clearFilters } = useWin();
+  const games = visibleGames(filters, running);
+  return (
+    <main className="@container relative flex h-full min-h-0 min-w-0 flex-col bg-background [--ring-bg:var(--background)]">
+      <LibraryHeader />
+      <div data-scroll className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
+        {games.length > 0 &&
+          (layout.main === "list" ? <List games={games} /> : <Grid games={games} />)}
+        {games.length === 0 && !filters.unvetted && (
+          <div className="grid justify-items-center gap-3 px-8 pt-24 text-center">
+            <div className="text-[15px] font-medium">No games match</div>
+            <p className="max-w-[44ch] text-[13px] leading-relaxed text-muted-foreground">
+              {filters.q
+                ? `Nothing in your sources is called “${filters.q}”.`
+                : "The filters you picked leave nothing in your sources."}{" "}
+              Turn a source back on, or loosen a filter.
+            </p>
+            <Button variant="secondary" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          </div>
+        )}
+        {filters.unvetted && (
+          <div className={games.length ? "" : "pt-6"}>
+            <Note
+              icon={<EyeSlashIcon className="size-5" />}
+              title={`${UNVETTED} unvetted listings`}
+            >
+              No curator has checked these yet. They load from relays as you scroll, carry no
+              sign-in rating, and Keyhall asks before it signs anything for them.
+            </Note>
+          </div>
+        )}
+      </div>
+      {layout.detail === "sheet" && layout.selected && <Sheet />}
     </main>
   );
 }

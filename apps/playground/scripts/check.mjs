@@ -8,107 +8,80 @@ const [file, shots] = process.argv.slice(2);
 mkdirSync(shots, { recursive: true });
 
 const base = {
-  sidebar: "sources",
-  main: "list",
-  inspector: "pane",
-  sections: "trust,stats,friends,listing",
-  bottom: "dock",
-  friends: "sidebar",
-  running: "dock",
+  nav: "labels",
+  main: "grid",
+  filterbar: "toolbar",
+  detail: "wide",
+  sections: "trust,stats,friends,signatures,listing",
+  bottom: "none",
+  friends: "column",
+  running: "nav",
   density: "comfortable",
+  page: "library",
   playing: "true",
   signing: "false",
+  filtered: "false",
   selected: "forgerealms",
 };
+const status = { bottom: "status", running: "status" };
+const dock = { bottom: "dock", running: "dock" };
 export const COMBOS = [
-  ["default-124", {}],
+  ["default", {}],
   ["default-signing", { signing: "true" }],
+  ["hover-page-chips", { nav: "hover", detail: "page", filterbar: "chips", selected: "nochess" }],
+  ["sidebar-expand-signing", { nav: "sidebar", detail: "expand", friends: "nav", signing: "true" }],
   [
-    "column-wide-dock",
-    { friends: "column", inspector: "wide", sections: "trust,stats,friends,signatures,listing" },
+    "icons-sheet-tabs",
+    { nav: "icons", detail: "sheet", filterbar: "tabs", friends: "nav", selected: "pallasite" },
   ],
+  ["list-expand-dock", { main: "list", detail: "expand", ...dock, selected: "nochess" }],
+  ["dock-signing-sheet", { ...dock, signing: "true", detail: "sheet", filterbar: "chips" }],
   [
-    "switches-grid-status",
-    {
-      sidebar: "switches",
-      main: "grid",
-      bottom: "status",
-      running: "status",
-      friends: "column",
-      selected: "nochess",
-    },
+    "status-compact-wide-list",
+    { ...status, density: "compact", main: "list", filterbar: "tabs", signing: "true" },
   ],
+  ["filtered-toolbar-wide", { filtered: "true", selected: "xenophon" }],
   [
-    "status-signing-compact",
+    "filtered-chips-expand-compact",
     {
-      sidebar: "switches",
-      bottom: "status",
-      running: "status",
-      signing: "true",
+      filtered: "true",
+      filterbar: "chips",
+      detail: "expand",
       density: "compact",
-      friends: "column",
+      selected: "nomad",
     },
   ],
+  ["filtered-tabs-none", { filtered: "true", filterbar: "tabs", selected: "none", nav: "hover" }],
+  ["friends-page-sidebar", { page: "friends", nav: "sidebar", ...status }],
+  ["budget-page-hover", { page: "budget", nav: "hover", ...dock }],
+  ["settings-page-icons", { page: "settings", nav: "icons", friends: "page" }],
   [
-    "rail-grid-only",
-    {
-      sidebar: "rail",
-      main: "grid",
-      inspector: "none",
-      bottom: "none",
-      running: "sidebar",
-      friends: "none",
-    },
+    "not-running-game-page",
+    { playing: "false", ...dock, detail: "page", friends: "page", selected: "neonsentinel" },
+  ],
+  ["no-sections-sheet", { sections: "", detail: "sheet", nav: "sidebar", friends: "page" }],
+  [
+    "sidebar-page-compact-dock",
+    { nav: "sidebar", detail: "page", density: "compact", ...dock, friends: "nav" },
+  ],
+  ["list-none-hover-nav", { main: "list", selected: "none", nav: "hover", friends: "nav" }],
+  ["list-sheet-status-tabs", { main: "list", detail: "sheet", filterbar: "tabs", ...status }],
+];
+// States a hash can't hold: [name, combo patch, what to do on the page].
+const INTERACTIONS = [
+  [
+    "hover-rail-open",
+    { nav: "hover", friends: "nav", selected: "none" },
+    (p) => p.hover("[data-hover-rail]"),
   ],
   [
-    "rail-sidebar-signing",
-    {
-      sidebar: "rail",
-      bottom: "none",
-      running: "sidebar",
-      signing: "true",
-      friends: "sidebar",
-      selected: "pallasite",
-    },
+    "hover-rail-signing",
+    { nav: "hover", signing: "true", detail: "sheet" },
+    (p) => p.hover("[data-hover-rail]"),
   ],
-  ["card-signing", { bottom: "status", running: "sidebar", signing: "true", friends: "sidebar" }],
-  [
-    "card-compact-inspector-friends",
-    {
-      sidebar: "switches",
-      bottom: "none",
-      running: "sidebar",
-      friends: "inspector",
-      density: "compact",
-      sections: "trust,friends,signatures",
-    },
-  ],
-  ["not-running-dock", { playing: "false", friends: "column" }],
-  [
-    "no-selection-list",
-    { selected: "none", friends: "column", bottom: "status", running: "status" },
-  ],
-  [
-    "grid-wide-running",
-    { main: "grid", inspector: "wide", selected: "neonsentinel", sections: "stats,signatures" },
-  ],
-  [
-    "rail-wide-column",
-    {
-      sidebar: "rail",
-      inspector: "wide",
-      friends: "column",
-      bottom: "status",
-      running: "status",
-      selected: "nochess",
-      density: "compact",
-    },
-  ],
-  [
-    "list-no-inspector",
-    { inspector: "none", friends: "none", bottom: "status", running: "status", playing: "false" },
-  ],
-  ["no-sections", { sections: "", selected: "pallasite", sidebar: "switches" }],
+  ["sources-menu-open", { selected: "none" }, (p) => p.click('[data-menu="Sources"] button')],
+  ["filters-menu-open", { filtered: "true" }, (p) => p.click('[data-menu="Filters"] button')],
+  ["search-no-match", { selected: "none" }, (p) => p.fill("[data-search]:visible", "zzz")],
 ];
 const hash = (patch) =>
   `#${new URLSearchParams({ ...base, ...patch }).toString().replaceAll("%2C", ",")}`;
@@ -190,13 +163,18 @@ function inspect() {
     const el = n.parentElement;
     const clip = clipper(el);
     const c = clip.getBoundingClientRect();
-    const scroller = el.closest("[data-scroll]");
-    const s = scroller?.getBoundingClientRect();
+    const s = el.closest("[data-scroll]")?.getBoundingClientRect();
+    const sideways = el.closest("[data-scroll-x]")?.getBoundingClientRect();
     for (const r of range.getClientRects()) {
       if (r.width < 1 || r.height < 1) continue;
       const label = n.textContent.trim().slice(0, 40);
-      // Rows scrolled past the edge of a scrolling list are meant to be out of view.
+      // Rows scrolled past the edge of a scrolling list are meant to be out of view,
+      // and so are chips scrolled past the side of a horizontal scroller.
       if (s && (r.top < s.top - 1 || r.bottom > s.bottom + 1)) continue;
+      if (sideways && (r.left < sideways.left - 1 || r.right > sideways.right + 1)) continue;
+      // Text under an overlay (a sheet, a menu, the open hover rail) is covered, not overlapping.
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!top || !(el.contains(top) || top.contains(el))) continue;
       const outX = r.left < c.left - 1 || r.right > c.right + 1;
       const outY = r.top < c.top - 1 || r.bottom > c.bottom + 1;
       if (outX && !truncates(el)) problems.push(`text "${label}" overflows sideways`);
@@ -239,9 +217,13 @@ for (const [name, launch] of Object.entries(browsers)) {
   let problems = 0;
   let images = 0;
   let broken = 0;
-  for (const [id, patch] of COMBOS) {
+  const run = async (id, patch, act) => {
     await page.evaluate((h) => (location.hash = h), hash(patch));
     await page.waitForTimeout(120);
+    if (act) {
+      await act(page);
+      await page.waitForTimeout(400);
+    }
     await page.evaluate(() =>
       Promise.all([...document.images].map((i) => i.decode().catch(() => {}))),
     );
@@ -257,7 +239,15 @@ for (const [name, launch] of Object.entries(browsers)) {
       await page
         .locator(".frame > div")
         .screenshot({ path: `${shots}/${id}.png`, animations: "disabled" });
-  }
+    if (act) {
+      await page.mouse.move(1850, 990);
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.fill("[data-search]:visible", "");
+    }
+  };
+  for (const [id, patch] of COMBOS) await run(id, patch);
+  for (const [id, patch, act] of INTERACTIONS) await run(id, patch, act);
 
   await page.evaluate((h) => (location.hash = h), hash({}));
   if (name === "chromium") {
@@ -288,7 +278,9 @@ for (const [name, launch] of Object.entries(browsers)) {
   }
   await page.evaluate(() => localStorage.clear());
 
-  console.log(`[${name}] combinations ${COMBOS.length}, layout problems ${problems}`);
+  console.log(
+    `[${name}] combinations ${COMBOS.length} + ${INTERACTIONS.length} interactions, layout problems ${problems}`,
+  );
   console.log(`[${name}] images ${images}, broken ${broken}`);
   console.log(`[${name}] external requests ${external.length} ${external.slice(0, 5).join(" ")}`);
   console.log(`[${name}] page errors ${errors.length} ${errors.slice(0, 5).join(" | ")}`);

@@ -68,6 +68,24 @@ export function RunningCard() {
       <div className="relative">
         <Cover game={running} className="h-[76px] w-full" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#1c1e25] via-[#1c1e25]/40 to-transparent" />
+        <div className="absolute top-1.5 right-1.5 flex gap-1">
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Show game window"
+            className="bg-black/50 text-white hover:bg-black/70"
+          >
+            <AppWindowIcon />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Quit game"
+            className="bg-black/50 text-white hover:bg-black/70"
+          >
+            <StopIcon weight="fill" />
+          </Button>
+        </div>
         <div className="absolute inset-x-3 bottom-1.5 flex items-center justify-between">
           <span className="truncate text-[13px] font-semibold text-white">{running.name}</span>
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-white/80 tabular-nums">
@@ -82,18 +100,10 @@ export function RunningCard() {
             Signed {last.what.toLowerCase()} · {last.ago} ago
           </span>
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <label className="flex flex-1 items-center gap-2 text-[11px] text-muted-foreground">
-            <Switch size="sm" checked={presence} onCheckedChange={setPresence} />
-            {presence ? "Friends see you" : "Hidden"}
-          </label>
-          <Button size="icon-xs" variant="ghost" aria-label="Show game window">
-            <AppWindowIcon />
-          </Button>
-          <Button size="icon-xs" variant="ghost" aria-label="Quit game">
-            <StopIcon weight="fill" />
-          </Button>
-        </div>
+        <label className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+          <Switch size="sm" checked={presence} onCheckedChange={setPresence} />
+          <span className="truncate">{presence ? "Friends see you" : "Hidden from friends"}</span>
+        </label>
       </div>
     </div>
   );

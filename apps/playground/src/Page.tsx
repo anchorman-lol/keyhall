@@ -8,14 +8,16 @@ import {
   BOTTOM,
   DEFAULT,
   DENSITY,
+  DETAIL,
+  FILTERBAR,
   FRIENDS_AT,
   fromHash,
-  INSPECTOR,
   MAIN,
+  NAV,
+  PAGES,
   RUNNING_AT,
   SECTIONS,
   SELECTABLE,
-  SIDEBAR,
   spec,
   toHash,
   type Layout,
@@ -26,8 +28,8 @@ import { WinProvider } from "./builder/state.tsx";
 import { game } from "./data.ts";
 import { Cover, Window } from "./kit.tsx";
 
-const KEY = "keyhall-ui-builder";
-const NOTES = "keyhall-ui-builder-notes";
+const KEY = "keyhall-ui-builder-r4";
+const NOTES = "keyhall-ui-builder-r4-notes";
 
 function initial(): Layout {
   const fromUrl = fromHash(location.hash);
@@ -98,7 +100,11 @@ function Segmented<V extends string>({
       data-control={name}
       className={cn(
         "grid gap-0.5 rounded-lg bg-black/30 p-0.5 ring-1 ring-white/[0.06]",
-        options.length === 3 ? "grid-cols-3" : "grid-cols-2",
+        options.length === 3
+          ? "grid-cols-3"
+          : options.length === 4 && name === "page"
+            ? "grid-cols-4"
+            : "grid-cols-2",
         disabled && "pointer-events-none opacity-40",
       )}
     >
@@ -203,7 +209,6 @@ export function Page() {
     setTimeout(() => setCopied(false), 1600);
   };
 
-  const noInspector = layout.inspector === "none";
   return (
     <div className="flex min-h-screen items-start gap-6 bg-[#0b0c10] py-6 pl-6">
       <Fit>
@@ -218,19 +223,19 @@ export function Page() {
         <header className="px-5 pt-6 pb-4">
           <h1 className="text-[17px] font-semibold tracking-[-0.01em]">Keyhall layout builder</h1>
           <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground text-pretty">
-            Put the window together region by region. It starts from 1 + 2 + 4: the source list, the
-            now-playing dock and the inspector. The window is live: click games, sources and
-            switches.
+            Round 4 starts from your layout: a rail, the cover grid, the wide pane and the friends
+            column. Sources moved out of the navigation into a filter bar, and a game can now open
+            four ways. The window is live: click games, filters and the navigation.
           </p>
         </header>
 
         <Group title="Regions">
-          <Field label="Left sidebar" hint={hintOf(SIDEBAR, layout.sidebar)}>
+          <Field label="Navigation" hint={hintOf(NAV, layout.nav)}>
             <Segmented
-              name="sidebar"
-              options={SIDEBAR}
-              value={layout.sidebar}
-              onChange={(sidebar) => set({ sidebar })}
+              name="nav"
+              options={NAV}
+              value={layout.nav}
+              onChange={(nav) => set({ nav })}
             />
           </Field>
           <Field label="Main area" hint={hintOf(MAIN, layout.main)}>
@@ -241,29 +246,31 @@ export function Page() {
               onChange={(main) => set({ main })}
             />
           </Field>
+          <Field label="Filter bar" hint={hintOf(FILTERBAR, layout.filterbar)}>
+            <Segmented
+              name="filterbar"
+              options={FILTERBAR}
+              value={layout.filterbar}
+              onChange={(filterbar) => set({ filterbar })}
+            />
+          </Field>
           <Field
-            label="Inspector"
+            label="Game detail"
             hint={
-              layout.selected || noInspector
-                ? hintOf(INSPECTOR, layout.inspector)
-                : "Select a game to open it."
+              layout.selected
+                ? hintOf(DETAIL, layout.detail)
+                : `${hintOf(DETAIL, layout.detail)} Pick a game below or in the window to see it.`
             }
           >
             <Segmented
-              name="inspector"
-              options={INSPECTOR}
-              value={layout.inspector}
-              onChange={(inspector) => set({ inspector })}
+              name="detail"
+              options={DETAIL}
+              value={layout.detail}
+              onChange={(detail) => set({ detail, page: "library" })}
             />
           </Field>
-          <Field label="Inspector sections">
-            <div
-              data-control="sections"
-              className={cn(
-                "flex flex-wrap gap-1.5",
-                noInspector && "pointer-events-none opacity-40",
-              )}
-            >
+          <Field label="Detail sections">
+            <div data-control="sections" className="flex flex-wrap gap-1.5">
               {SECTIONS.map((s) => {
                 const on = layout.sections.includes(s.value);
                 return (
@@ -303,14 +310,7 @@ export function Page() {
               onChange={(bottom) => set({ bottom })}
             />
           </Field>
-          <Field
-            label="Friends"
-            hint={
-              layout.friends === "inspector" && noInspector
-                ? "With no inspector, friends don't show anywhere."
-                : hintOf(FRIENDS_AT, layout.friends)
-            }
-          >
+          <Field label="Friends" hint={hintOf(FRIENDS_AT, layout.friends)}>
             <Segmented
               name="friends"
               options={FRIENDS_AT}
@@ -320,7 +320,7 @@ export function Page() {
           </Field>
           <Field
             label="Running game"
-            hint="Moves with Bottom: the dock and the status bar both hold the running game."
+            hint={`${hintOf(RUNNING_AT, layout.running)} Moves with Bottom: the dock and the status bar both hold it.`}
           >
             <Segmented
               name="running"
@@ -340,6 +340,14 @@ export function Page() {
         </Group>
 
         <Group title="State">
+          <Field label="Showing">
+            <Segmented
+              name="page"
+              options={PAGES}
+              value={layout.page}
+              onChange={(page) => set({ page })}
+            />
+          </Field>
           <Toggle
             name="playing"
             label="A game is running"
@@ -355,7 +363,14 @@ export function Page() {
             disabled={!layout.playing}
             onChange={(signing) => set({ signing })}
           />
-          <Field label="Selected game">
+          <Toggle
+            name="filtered"
+            label="Filters applied"
+            hint="Multiplayer, signs through Keyhall, no Board-game table"
+            checked={layout.filtered}
+            onChange={(filtered) => set({ filtered })}
+          />
+          <Field label="Open game">
             <div data-control="selected" className="grid grid-cols-5 gap-1.5">
               {[null, ...SELECTABLE].map((id) => {
                 const on = layout.selected === id;
@@ -364,8 +379,8 @@ export function Page() {
                     key={id ?? "none"}
                     data-value={id ?? "none"}
                     aria-pressed={on}
-                    title={id ? game(id).name : "No game selected"}
-                    onClick={() => set({ selected: id })}
+                    title={id ? game(id).name : "No game open"}
+                    onClick={() => set({ selected: id, page: "library" })}
                     className={cn(
                       "aspect-[4/3] overflow-hidden rounded-md ring-1 transition-shadow",
                       on ? "ring-2 ring-primary" : "ring-white/10 hover:ring-white/30",
@@ -383,7 +398,7 @@ export function Page() {
               })}
             </div>
             <p className="mt-1.5 text-[12px] text-muted-foreground">
-              {layout.selected ? game(layout.selected).name : "Nothing selected"}
+              {layout.selected ? game(layout.selected).name : "No game open"}
             </p>
           </Field>
         </Group>
@@ -412,8 +427,8 @@ export function Page() {
             <Button
               variant="secondary"
               size="icon"
-              aria-label="Reset to 1 + 2 + 4"
-              title="Reset to 1 + 2 + 4"
+              aria-label="Reset to the round 4 start"
+              title="Reset to the round 4 start"
               onClick={() => setLayout(DEFAULT)}
             >
               <ArrowCounterClockwiseIcon />

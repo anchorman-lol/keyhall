@@ -522,3 +522,8 @@ export const CURATOR: Record<SourceId, string> = {
   coop: "Juno",
   worlds: "Tomasz",
 };
+
+export const DEPTH = ["Any", "Uses your key", "Saves to relays", "Plays over relays"] as const;
+export const depth = (g: Game) =>
+  g.signIn === "none" ? 0 : g.multiplayer ? 3 : g.signIn === "signer" ? 2 : 1;
+export const recentlyUpdated = (g: Game) => /day|Yesterday|^Nov /.test(g.updated);
