@@ -98,6 +98,8 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     ...signerFor(secret),
     ...relay(),
     fetchFriends: async () => [],
+    fetchProfile: async (pubkey) => ({ pubkey }),
+    saveFriendsOpen: vi.fn(),
     savePresence: vi.fn(),
     sessions: async () => [],
     walletStatus: async () => null,
@@ -467,6 +469,40 @@ describe("friends", () => {
     mock.deliver(finalizeEvent(publicStatus(game, now()), sam));
     mock.deliver(finalizeEvent(publicStatus(undefined, now() - 60), sam));
     expect(playing(actor.getSnapshot().context)).toHaveLength(1);
+  });
+});
+
+describe("identity", () => {
+  it("loads the player's own profile once the key is ready", async () => {
+    const me = { pubkey: getPublicKey(secret), name: "Leon", picture: "https://x.test/l.png" };
+    const fetchProfile = vi.fn(async () => me);
+    const { actor } = start({ keyStatus: async () => npub, fetchProfile });
+    await waitFor(actor, (s) => s.context.profile !== undefined);
+    expect(fetchProfile).toHaveBeenCalledWith(getPublicKey(secret));
+    expect(actor.getSnapshot().context.profile).toEqual(me);
+  });
+
+  it("keeps the bare pubkey when the profile can't be fetched", async () => {
+    const { actor } = start({
+      keyStatus: async () => npub,
+      fetchProfile: () => Promise.reject(new Error("offline")),
+    });
+    await waitFor(actor, (s) => s.context.profile !== undefined);
+    expect(actor.getSnapshot().context.profile).toEqual({ pubkey: getPublicKey(secret) });
+  });
+
+  it("shows the friends column by default, toggles it and saves the choice", () => {
+    const saveFriendsOpen = vi.fn();
+    const { actor } = start({ saveFriendsOpen });
+    expect(actor.getSnapshot().context.friendsOpen).toBe(true);
+    actor.send({ type: "friends.toggle" });
+    expect(actor.getSnapshot().context.friendsOpen).toBe(false);
+    expect(saveFriendsOpen).toHaveBeenLastCalledWith(false);
+  });
+
+  it("starts with the friends column hidden when that was saved", () => {
+    const { actor } = start({}, { friendsOpen: false });
+    expect(actor.getSnapshot().context.friendsOpen).toBe(false);
   });
 });
 

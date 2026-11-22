@@ -50,7 +50,7 @@ export function lastUpdated(...times: (number | undefined)[]): number {
 }
 
 export const tag = (e: NostrEvent, name: string) => e.tags.find((t) => t[0] === name)?.[1];
-const https = (url: unknown) =>
+export const https = (url: unknown) =>
   typeof url === "string" && url.startsWith("https://") ? url : undefined;
 
 function metadata(content: string): Record<string, unknown> {

@@ -6,6 +6,7 @@ import type { Game } from "./listing";
 import {
   circleStatus,
   modeFor,
+  parseProfile,
   planCircle,
   publicStatus,
   readStatus,
@@ -23,6 +24,33 @@ describe("settings", () => {
     const settings = { mode: "friends" as const, games: { [game.coordinate]: "hidden" as const } };
     expect(modeFor(settings, game.coordinate)).toBe("hidden");
     expect(modeFor(settings, "31990:abc:other")).toBe("friends");
+  });
+});
+
+describe("profile", () => {
+  const profile = (content: string) =>
+    finalizeEvent({ kind: 0, created_at: now, content, tags: [] }, generateSecretKey());
+
+  it("prefers the display name and keeps an https picture", () => {
+    const e = profile(
+      JSON.stringify({ name: "mira", display_name: "Mira", picture: "https://x.test/m.png" }),
+    );
+    expect(parseProfile(e.pubkey, e)).toEqual({
+      pubkey: e.pubkey,
+      name: "Mira",
+      picture: "https://x.test/m.png",
+    });
+  });
+
+  it("drops pictures that aren't https, so the avatar falls back", () => {
+    const e = profile(JSON.stringify({ name: "sam", picture: "http://x.test/s.png" }));
+    expect(parseProfile(e.pubkey, e)).toEqual({ pubkey: e.pubkey, name: "sam" });
+  });
+
+  it("is just the pubkey without a profile or with broken JSON", () => {
+    expect(parseProfile("abc")).toEqual({ pubkey: "abc" });
+    const e = profile("{");
+    expect(parseProfile(e.pubkey, e)).toEqual({ pubkey: e.pubkey });
   });
 });
 

@@ -30,10 +30,12 @@ function Settings() {
 }
 
 export function App() {
-  const { current, view } = Launcher.useSelector((s) => s.context);
+  const { current, view, friendsOpen } = Launcher.useSelector((s) => s.context);
   const [filters, setFilters] = useState(NO_FILTERS);
   return (
-    <div className="grid h-screen grid-cols-[72px_minmax(0,1fr)_264px] grid-rows-[auto_minmax(0,1fr)] text-[13px]">
+    <div
+      className={`grid h-screen grid-rows-[auto_minmax(0,1fr)] text-[13px] ${friendsOpen ? "grid-cols-[72px_minmax(0,1fr)_264px]" : "grid-cols-[72px_minmax(0,1fr)]"}`}
+    >
       <TitleBar />
       <Nav />
       <div className="min-h-0 min-w-0">
@@ -49,7 +51,7 @@ export function App() {
           <Library filters={filters} setFilters={setFilters} />
         )}
       </div>
-      <FriendsColumn />
+      {friendsOpen && <FriendsColumn />}
       <SignRequest />
       <KeyWarning />
     </div>

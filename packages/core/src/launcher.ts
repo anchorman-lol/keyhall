@@ -83,6 +83,8 @@ export interface LauncherDeps extends PresenceDeps {
   signLabel(template: ReturnType<typeof labelTemplate>): Promise<Event>;
   publish(event: Event): Promise<void>;
   fetchFriends(pubkey: string): Promise<Friend[]>;
+  fetchProfile(pubkey: string): Promise<Friend>;
+  saveFriendsOpen(open: boolean): void;
   savePresence(presence: PresenceSettings, circle: Circle | undefined): void;
   sessions(): Promise<Session[]>;
   walletStatus(): Promise<string | null>;
@@ -102,6 +104,7 @@ export interface Stored {
   circle: Circle;
   sources: SourceSettings;
   budget: BudgetSettings;
+  friendsOpen: boolean;
 }
 
 export interface Fetched {
@@ -129,6 +132,8 @@ export interface LauncherContext {
   current?: Game;
   view?: "budget" | "settings";
   friends?: Friend[];
+  friendsOpen: boolean;
+  profile?: Friend;
   statuses: Record<string, Status>;
   presence: PresenceSettings;
   circle?: Circle;
@@ -156,6 +161,7 @@ type Events =
   | { type: "source.loaded"; id: string; lists: CuratorList[]; games: Game[] }
   | { type: "updated"; coordinate: string; time: number }
   | { type: "view"; view: "budget" | "settings" }
+  | { type: "friends.toggle" }
   | { type: "presence.mode"; mode: PresenceMode }
   | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
   | { type: "friend-status"; pubkey: string; at: number; status?: Status }
@@ -234,7 +240,7 @@ export function curatorName(context: LauncherContext, pubkey: string) {
   );
 }
 
-const pubkeyOf = (context: LauncherContext) =>
+export const pubkeyOf = (context: LauncherContext) =>
   context.npub ? (decode(context.npub as `npub1${string}`).data as string) : undefined;
 
 export function wantedPresence(context: LauncherContext): Published | undefined {
@@ -330,6 +336,9 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           .then((label) => sendBack({ type: "opened", coordinate: input.coordinate, label }));
       }),
       fetchFriends: fromPromise<Friend[], string>(({ input }) => deps.fetchFriends(input)),
+      fetchProfile: fromPromise<Friend, string>(({ input }) =>
+        deps.fetchProfile(input).catch(() => ({ pubkey: input })),
+      ),
       watchFriends: fromCallback<Events, { me: string; follows: string[] }>(({ input, sendBack }) =>
         watchFriends(deps, input.me, input.follows, (pubkey, at, status) =>
           sendBack({ type: "friend-status", pubkey, at, status }),
@@ -402,6 +411,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       windows: {},
       requests: [],
       statuses: {},
+      friendsOpen: stored.friendsOpen ?? true,
       presence: stored.presence ?? DEFAULT_PRESENCE,
       circle: stored.circle,
       budget: stored.budget ?? { sats: 0, paid: {} },
@@ -502,6 +512,12 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           enqueueActions(({ enqueue, event }) => {
             if (event.view === "budget") enqueue.spawnChild("loadSessions");
           }),
+        ],
+      },
+      "friends.toggle": {
+        actions: [
+          assign({ friendsOpen: ({ context }) => !context.friendsOpen }),
+          ({ context }) => deps.saveFriendsOpen(context.friendsOpen),
         ],
       },
       "presence.mode": {
@@ -673,6 +689,23 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
               }),
             },
           },
+        },
+      },
+      profile: {
+        initial: "waiting",
+        states: {
+          waiting: { always: { guard: ({ context }) => !!context.npub, target: "loading" } },
+          loading: {
+            invoke: {
+              src: "fetchProfile",
+              input: ({ context }) => pubkeyOf(context)!,
+              onDone: {
+                target: "ready",
+                actions: assign({ profile: ({ event }) => event.output }),
+              },
+            },
+          },
+          ready: {},
         },
       },
       presence: {

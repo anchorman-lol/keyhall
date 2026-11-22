@@ -1,16 +1,19 @@
-import { running } from "@keyhall/core/launcher";
+import { pubkeyOf, running } from "@keyhall/core/launcher";
 import type { Game } from "@keyhall/core/listing";
+import type { Friend } from "@keyhall/core/presence";
 import { Button } from "@keyhall/ui/components/button";
 import { cn } from "@keyhall/ui/lib/utils";
 import {
   AppWindowIcon,
   CoinsIcon,
   GearSixIcon,
+  KeyholeIcon,
   SquaresFourIcon,
   StopIcon,
   type Icon,
 } from "@phosphor-icons/react";
 import { minutes, Launcher, useNow } from "./launcher.ts";
+import { Avatar } from "./Friends.tsx";
 import { Cover, GameIcon, Live } from "./Library.tsx";
 
 const fade =
@@ -104,10 +107,35 @@ function RunningCard({ game, since }: { game: Game; since: number | undefined })
   );
 }
 
+function Identity({ npub, me }: { npub: string; me: Friend }) {
+  const short = `${npub.slice(0, 12)}…${npub.slice(-4)}`;
+  return (
+    <div title={npub} className="flex h-10 items-center">
+      <span className="grid w-10 shrink-0 place-items-center">
+        <Avatar
+          friend={me}
+          className="size-8"
+          fallback={<KeyholeIcon weight="fill" className="size-[18px] text-primary" />}
+        />
+      </span>
+      <span className={cn("grid min-w-0 flex-1 pl-1.5 leading-tight", fade)}>
+        <span
+          className={cn("truncate", me.name ? "text-[13px] font-medium" : "font-mono text-[11px]")}
+        >
+          {me.name ?? short}
+        </span>
+        {me.name && (
+          <span className="truncate font-mono text-[11px] text-muted-foreground">{short}</span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 export function Nav() {
   const context = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
-  const { view } = context;
+  const { view, npub, profile } = context;
   return (
     <aside className="relative z-30 h-full">
       <div className="group/rail absolute inset-y-0 left-0 flex w-[72px] flex-col overflow-clip border-r border-white/[0.06] bg-sidebar px-4 transition-[width,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] has-[:focus-visible]:w-[232px] hover:w-[232px] hover:shadow-[16px_0_40px_-12px_rgba(0,0,0,0.65)] motion-reduce:transition-none">
@@ -135,6 +163,7 @@ export function Nav() {
           {running(context).map(({ game, since }) => (
             <RunningCard key={game.coordinate} game={game} since={since} />
           ))}
+          {npub && <Identity npub={npub} me={profile ?? { pubkey: pubkeyOf(context)! }} />}
         </div>
       </div>
     </aside>

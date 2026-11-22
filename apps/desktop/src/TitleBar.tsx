@@ -1,4 +1,11 @@
-import { CaretRightIcon, KeyholeIcon, MinusIcon, SquareIcon, XIcon } from "@phosphor-icons/react";
+import {
+  CaretRightIcon,
+  KeyholeIcon,
+  MinusIcon,
+  SquareIcon,
+  UsersIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Launcher } from "./launcher.ts";
 
@@ -25,7 +32,7 @@ const CONTROLS = [
 ];
 
 export function TitleBar() {
-  const { current, view, npub } = Launcher.useSelector((s) => s.context);
+  const { current, view, friendsOpen } = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
   const crumb =
     "rounded-md px-1.5 py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
@@ -64,11 +71,15 @@ export function TitleBar() {
           <span className="px-1.5 text-foreground">Library</span>
         )}
       </nav>
-      {npub && (
-        <span title={npub} className="font-mono text-[11px] text-muted-foreground">
-          {npub.slice(0, 12)}…{npub.slice(-4)}
-        </span>
-      )}
+      <button
+        aria-label="Friends"
+        aria-pressed={friendsOpen}
+        title={friendsOpen ? "Hide friends" : "Show friends"}
+        onClick={() => send({ type: "friends.toggle" })}
+        className={`grid size-7 place-items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60 ${friendsOpen ? "bg-white/[0.075] text-primary" : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"}`}
+      >
+        <UsersIcon weight={friendsOpen ? "fill" : "regular"} className="size-4" />
+      </button>
       <div className="flex self-stretch">
         {CONTROLS.map(({ label, Icon, run, hover }) => (
           <button

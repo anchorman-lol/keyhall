@@ -18,7 +18,7 @@ A desktop (macOS-first) launcher and library for Nostr games. Each web game open
 - **Library and sources.** Listings are NIP-89 kind 31990 events. Sources are Keyhall picks (kind 30267 `d=games-default` under `PICKS_PUBKEY` in `core/curation.ts`, not yet published, so picks are empty), curator lists (npub → all their lists tagged `t=games`, or an naddr) and unvetted listings (every 31990 tagged `t=game(s)`). The library is the union of enabled sources (`core/sources.ts`). Curator NIP-32 labels (kind 1985, `L=game.auth` / `L=game.depth`) override listing tags (`core/labels.ts`).
 - **Presence.** Friends are the NIP-02 follow list. Statuses are NIP-38 kind 30315 `d=game`; friends-only mode uses a circle key gift-wrapped (NIP-59) to each follow and rotated on unfollow (`core/presence.ts`). The circle key is in local storage for now.
 - **Budget.** Rust meters play time per game window and checkpoints `playtime.json` in the app data dir every 30 s. `core/budget.ts` splits the month; `core/zap.ts` pays anonymous zaps over NWC. The NWC URI is in the keychain and only Rust signs and decrypts NIP-47 messages; the webview just relays them.
-- **Persistence.** Keychain (service `lol.anchorman.keyhall`, accounts `nsec` and `nwc`) for secrets; `localStorage` for sources, observed kinds, presence and budget settings.
+- **Persistence.** Keychain (service `lol.anchorman.keyhall`, accounts `nsec` and `nwc`) for secrets; `localStorage` for sources, observed kinds, presence and budget settings, and whether the friends column is shown.
 
 ## Commands
 

@@ -1,21 +1,32 @@
 import { findGame, playing } from "@keyhall/core/launcher";
 import { friendName, type Friend } from "@keyhall/core/presence";
 import { EyeIcon } from "@phosphor-icons/react";
+import { useState, type ReactNode } from "react";
 import { Launcher } from "./launcher.ts";
 import { GameIcon } from "./Library.tsx";
 
-function Avatar({ friend, className = "size-7" }: { friend: Friend; className?: string }) {
-  return friend.picture ? (
+export function Avatar({
+  friend,
+  className = "size-7",
+  fallback = friendName(friend).slice(0, 1),
+}: {
+  friend: Friend;
+  className?: string;
+  fallback?: ReactNode;
+}) {
+  const [broken, setBroken] = useState(false);
+  return friend.picture && !broken ? (
     <img
       src={friend.picture}
       alt=""
+      onError={() => setBroken(true)}
       className={`shrink-0 rounded-full object-cover ${className}`}
     />
   ) : (
     <span
       className={`grid shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold uppercase ${className}`}
     >
-      {friendName(friend).slice(0, 1)}
+      {fallback}
     </span>
   );
 }
