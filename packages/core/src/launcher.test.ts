@@ -18,6 +18,7 @@ import {
   library,
   monthSplit,
   playing,
+  running,
   sourceLabel,
   type BudgetSettings,
   type LauncherDeps,
@@ -85,6 +86,7 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     fetchLastUpdated: async () => 200,
     openGame: async () => "game-1",
     checkGame: vi.fn(),
+    closeGame: vi.fn(),
     answer: vi.fn(),
     listen: (send) => {
       emit = send;
@@ -96,6 +98,8 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     ...signerFor(secret),
     ...relay(),
     fetchFriends: async () => [],
+    fetchProfile: async (pubkey) => ({ pubkey }),
+    saveFriendsOpen: vi.fn(),
     savePresence: vi.fn(),
     sessions: async () => [],
     walletStatus: async () => null,
@@ -244,19 +248,42 @@ describe("library", () => {
     expect(actor.getSnapshot().context.current).toBeUndefined();
   });
 
-  it("opens a game window, then tests sign-in in it", async () => {
+  it("opens a game window, then tests sign-in in it and quits it", async () => {
     const { actor, deps } = start();
     actor.send({ type: "play", game });
     await waitFor(actor, (s) => s.context.windows[game.coordinate] === "game-1");
     actor.send({ type: "check", game });
     expect(deps.checkGame).toHaveBeenCalledWith("game-1");
+    actor.send({ type: "quit", game });
+    expect(deps.closeGame).toHaveBeenCalledWith("game-1");
+  });
+
+  it("says since when each open game runs, from fresh play time", async () => {
+    const sessions = vi.fn(async () => [
+      { coordinate: game.coordinate, start: 10, end: 20 },
+      { coordinate: game.coordinate, start: 50, end: 60 },
+    ]);
+    const { actor } = start({ sessions });
+    actor.send({ type: "select", game });
+    await waitFor(actor, (s) => s.context.sessions.length > 0);
+    expect(running(actor.getSnapshot().context)).toEqual([]);
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => running(s.context).length > 0);
+    expect(running(actor.getSnapshot().context)).toEqual([{ game, since: 50 }]);
+    expect(sessions).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("signer", () => {
   it("asks about one sign request at a time and passes the answer on", async () => {
     const { actor, deps, emit } = start();
-    const request = (id: number) => ({ id, game: "Blockstr", kind: 1, content: "" });
+    const request = (id: number) => ({
+      id,
+      game: "Blockstr",
+      coordinate: game.coordinate,
+      kind: 1,
+      content: "",
+    });
     emit({ type: "sign-request", request: request(1) });
     emit({ type: "sign-request", request: request(2) });
     expect(actor.getSnapshot().matches({ signer: "asking" })).toBe(true);
@@ -442,6 +469,40 @@ describe("friends", () => {
     mock.deliver(finalizeEvent(publicStatus(game, now()), sam));
     mock.deliver(finalizeEvent(publicStatus(undefined, now() - 60), sam));
     expect(playing(actor.getSnapshot().context)).toHaveLength(1);
+  });
+});
+
+describe("identity", () => {
+  it("loads the player's own profile once the key is ready", async () => {
+    const me = { pubkey: getPublicKey(secret), name: "Leon", picture: "https://x.test/l.png" };
+    const fetchProfile = vi.fn(async () => me);
+    const { actor } = start({ keyStatus: async () => npub, fetchProfile });
+    await waitFor(actor, (s) => s.context.profile !== undefined);
+    expect(fetchProfile).toHaveBeenCalledWith(getPublicKey(secret));
+    expect(actor.getSnapshot().context.profile).toEqual(me);
+  });
+
+  it("keeps the bare pubkey when the profile can't be fetched", async () => {
+    const { actor } = start({
+      keyStatus: async () => npub,
+      fetchProfile: () => Promise.reject(new Error("offline")),
+    });
+    await waitFor(actor, (s) => s.context.profile !== undefined);
+    expect(actor.getSnapshot().context.profile).toEqual({ pubkey: getPublicKey(secret) });
+  });
+
+  it("shows the friends column by default, toggles it and saves the choice", () => {
+    const saveFriendsOpen = vi.fn();
+    const { actor } = start({ saveFriendsOpen });
+    expect(actor.getSnapshot().context.friendsOpen).toBe(true);
+    actor.send({ type: "friends.toggle" });
+    expect(actor.getSnapshot().context.friendsOpen).toBe(false);
+    expect(saveFriendsOpen).toHaveBeenLastCalledWith(false);
+  });
+
+  it("starts with the friends column hidden when that was saved", () => {
+    const { actor } = start({}, { friendsOpen: false });
+    expect(actor.getSnapshot().context.friendsOpen).toBe(false);
   });
 });
 

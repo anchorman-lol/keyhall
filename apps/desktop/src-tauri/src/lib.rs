@@ -14,8 +14,8 @@ use nostr::prelude::{Event, Keys, PublicKey, ToBech32};
 use serde_json::json;
 use tauri::ipc::CapabilityBuilder;
 use tauri::{
-    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, Emitter, Manager, State, UserAttentionType, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
 };
 use tokio::sync::oneshot;
 use url::Url;
@@ -258,6 +258,17 @@ fn check_game(app: AppHandle, label: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn close_game(app: AppHandle, state: State<Launcher>, label: String) -> Result<(), String> {
+    if !state.games.lock().unwrap().contains_key(&label) {
+        return Err("Not a game window".into());
+    }
+    match app.get_webview_window(&label) {
+        Some(window) => window.close().map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
+}
+
+#[tauri::command]
 fn answer_sign_request(state: State<Launcher>, id: u64, allow: bool) {
     if let Some(reply) = state.pending.lock().unwrap().remove(&id) {
         let _ = reply.send(allow);
@@ -315,10 +326,12 @@ async fn nostr_sign_event(
         let main = app
             .get_webview_window("main")
             .ok_or("The launcher window is closed")?;
+        let _ = main.unminimize();
         let _ = main.set_focus();
+        let _ = main.request_user_attention(Some(UserAttentionType::Critical));
         main.emit(
             "sign-request",
-            json!({"id": id, "game": game.name, "kind": event.kind, "content": event.content}),
+            json!({"id": id, "game": game.name, "coordinate": game.coordinate, "kind": event.kind, "content": event.content}),
         )
         .map_err(|e| e.to_string())?;
         if !answer.await.unwrap_or(false) {
@@ -371,10 +384,30 @@ async fn sign_label(app: AppHandle, event: EventRequest) -> Result<Event, String
     signer::label(&keychain_task(app, Launcher::keys).await?, &event)
 }
 
+/// The launcher draws its window controls on the right of its title bar, like Steam.
+#[cfg(target_os = "macos")]
+fn hide_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+    // SAFETY: setup runs on the main thread and the pointer is the window's live NSWindow.
+    let ns_window = unsafe { &*window.ns_window()?.cast::<NSWindow>() };
+    for kind in [
+        NSWindowButton::CloseButton,
+        NSWindowButton::MiniaturizeButton,
+        NSWindowButton::ZoomButton,
+    ] {
+        if let Some(button) = ns_window.standardWindowButton(kind) {
+            button.setHidden(true);
+        }
+    }
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(Launcher::default())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            hide_traffic_lights(&app.get_webview_window("main").expect("main window"))?;
             let path = app.path().app_data_dir()?.join("playtime.json");
             app.manage(Mutex::new(Meter::load(path)));
             let handle = app.handle().clone();
@@ -396,6 +429,7 @@ pub fn run() {
             import_key,
             open_game,
             check_game,
+            close_game,
             answer_sign_request,
             sign_event,
             nip44_encrypt,

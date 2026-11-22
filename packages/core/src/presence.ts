@@ -12,7 +12,7 @@ import {
 } from "nostr-tools/pure";
 import type { Filter } from "nostr-tools/filter";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
-import type { Game } from "./listing";
+import { https, type Game } from "./listing";
 
 export type PresenceMode = "public" | "friends" | "hidden";
 
@@ -59,6 +59,15 @@ export const modeFor = (settings: PresenceSettings, coordinate: string) =>
   settings.games[coordinate] ?? settings.mode;
 
 export const friendName = (f: Friend) => f.name ?? `${npubEncode(f.pubkey).slice(0, 12)}…`;
+
+export function parseProfile(pubkey: string, event?: Event): Friend {
+  try {
+    const { name, display_name, picture } = JSON.parse(event?.content ?? "{}");
+    return { pubkey, name: display_name || name || undefined, picture: https(picture) };
+  } catch {
+    return { pubkey };
+  }
+}
 
 export const circlePubkey = (secret: string) => getPublicKey(hexToBytes(secret));
 

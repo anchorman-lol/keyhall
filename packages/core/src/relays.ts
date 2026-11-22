@@ -4,7 +4,7 @@ import type { Event } from "nostr-tools/pure";
 import { listsFor, type CuratorList, type ListRef } from "./curation";
 import { AUTH_NS, DEPTH_NS, parseLabels, type Label } from "./labels";
 import { lastUpdated, parseListings, type Game } from "./listing";
-import type { Friend } from "./presence";
+import { parseProfile, type Friend } from "./presence";
 import { payOverNwc, zapInvoice, type Payment, type WalletRequest } from "./zap";
 
 const RELAYS = [
@@ -56,19 +56,17 @@ export async function fetchFriends(pubkey: string): Promise<Friend[]> {
   const follows = [
     ...new Set(contacts?.tags.filter((t) => t[0] === "p" && t[1]).map((t) => t[1]!)),
   ];
-  if (!follows.length) return [];
-  const profiles = new Map<string, Event>();
-  for (const e of await pool.querySync(RELAYS, { kinds: [0], authors: follows }, { maxWait: 4000 }))
-    if ((profiles.get(e.pubkey)?.created_at ?? 0) < e.created_at) profiles.set(e.pubkey, e);
-  return follows.map((pubkey) => {
-    try {
-      const { name, display_name, picture } = JSON.parse(profiles.get(pubkey)?.content ?? "{}");
-      return { pubkey, name: display_name || name || undefined, picture: picture || undefined };
-    } catch {
-      return { pubkey };
-    }
-  });
+  return follows.length ? fetchProfiles(follows) : [];
 }
+
+async function fetchProfiles(pubkeys: string[]): Promise<Friend[]> {
+  const profiles = new Map<string, Event>();
+  for (const e of await pool.querySync(RELAYS, { kinds: [0], authors: pubkeys }, { maxWait: 4000 }))
+    if ((profiles.get(e.pubkey)?.created_at ?? 0) < e.created_at) profiles.set(e.pubkey, e);
+  return pubkeys.map((pubkey) => parseProfile(pubkey, profiles.get(pubkey)));
+}
+
+export const fetchProfile = async (pubkey: string) => (await fetchProfiles([pubkey]))[0]!;
 
 export const subscribe = (filter: Filter, onevent: (event: Event) => void) => {
   const sub = pool.subscribeMany(RELAYS, filter, { onevent });

@@ -51,6 +51,7 @@ export interface ShimCall {
 export interface SignRequest {
   id: number;
   game: string;
+  coordinate: string;
   kind: number;
   content: string;
 }
@@ -74,6 +75,7 @@ export interface LauncherDeps extends PresenceDeps {
   fetchLastUpdated(game: Game): Promise<number>;
   openGame(game: Game): Promise<string>;
   checkGame(label: string): void;
+  closeGame(label: string): void;
   answer(id: number, allow: boolean): void;
   listen(send: (event: LauncherEvent) => void): () => void;
   saveObserved(observed: Record<string, Observation>): void;
@@ -81,6 +83,8 @@ export interface LauncherDeps extends PresenceDeps {
   signLabel(template: ReturnType<typeof labelTemplate>): Promise<Event>;
   publish(event: Event): Promise<void>;
   fetchFriends(pubkey: string): Promise<Friend[]>;
+  fetchProfile(pubkey: string): Promise<Friend>;
+  saveFriendsOpen(open: boolean): void;
   savePresence(presence: PresenceSettings, circle: Circle | undefined): void;
   sessions(): Promise<Session[]>;
   walletStatus(): Promise<string | null>;
@@ -100,6 +104,7 @@ export interface Stored {
   circle: Circle;
   sources: SourceSettings;
   budget: BudgetSettings;
+  friendsOpen: boolean;
 }
 
 export interface Fetched {
@@ -127,6 +132,8 @@ export interface LauncherContext {
   current?: Game;
   view?: "budget" | "settings";
   friends?: Friend[];
+  friendsOpen: boolean;
+  profile?: Friend;
   statuses: Record<string, Status>;
   presence: PresenceSettings;
   circle?: Circle;
@@ -146,6 +153,7 @@ type Events =
   | { type: "play"; game: Game }
   | { type: "opened"; coordinate: string; label: string }
   | { type: "check"; game: Game }
+  | { type: "quit"; game: Game }
   | { type: "answer"; allow: boolean }
   | { type: "source.toggle"; id: string }
   | { type: "source.add"; input: string }
@@ -153,6 +161,7 @@ type Events =
   | { type: "source.loaded"; id: string; lists: CuratorList[]; games: Game[] }
   | { type: "updated"; coordinate: string; time: number }
   | { type: "view"; view: "budget" | "settings" }
+  | { type: "friends.toggle" }
   | { type: "presence.mode"; mode: PresenceMode }
   | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
   | { type: "friend-status"; pubkey: string; at: number; status?: Status }
@@ -231,7 +240,7 @@ export function curatorName(context: LauncherContext, pubkey: string) {
   );
 }
 
-const pubkeyOf = (context: LauncherContext) =>
+export const pubkeyOf = (context: LauncherContext) =>
   context.npub ? (decode(context.npub as `npub1${string}`).data as string) : undefined;
 
 export function wantedPresence(context: LauncherContext): Published | undefined {
@@ -254,6 +263,13 @@ export function playing(context: LauncherContext, now = Date.now() / 1000) {
     return status && status.expires > now ? [{ friend, status }] : [];
   });
 }
+
+export const running = (context: LauncherContext) =>
+  Object.keys(context.windows).flatMap((coordinate) => {
+    const game = findGame(context, coordinate);
+    const since = context.sessions.findLast((s) => s.coordinate === coordinate)?.start;
+    return game ? [{ game, since }] : [];
+  });
 
 export function monthSplit(context: LauncherContext, month: string) {
   const games = Object.values(context.listings);
@@ -320,6 +336,9 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           .then((label) => sendBack({ type: "opened", coordinate: input.coordinate, label }));
       }),
       fetchFriends: fromPromise<Friend[], string>(({ input }) => deps.fetchFriends(input)),
+      fetchProfile: fromPromise<Friend, string>(({ input }) =>
+        deps.fetchProfile(input).catch(() => ({ pubkey: input })),
+      ),
       watchFriends: fromCallback<Events, { me: string; follows: string[] }>(({ input, sendBack }) =>
         watchFriends(deps, input.me, input.follows, (pubkey, at, status) =>
           sendBack({ type: "friend-status", pubkey, at, status }),
@@ -392,6 +411,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       windows: {},
       requests: [],
       statuses: {},
+      friendsOpen: stored.friendsOpen ?? true,
       presence: stored.presence ?? DEFAULT_PRESENCE,
       circle: stored.circle,
       budget: stored.budget ?? { sats: 0, paid: {} },
@@ -478,13 +498,26 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           updated: ({ context, event }) => ({ ...context.updated, [event.coordinate]: event.time }),
         }),
       },
-      select: { actions: assign({ current: ({ event }) => event.game, view: undefined }) },
+      select: {
+        actions: [
+          assign({ current: ({ event }) => event.game, view: undefined }),
+          enqueueActions(({ enqueue, event }) => {
+            if (event.game) enqueue.spawnChild("loadSessions");
+          }),
+        ],
+      },
       view: {
         actions: [
           assign({ current: undefined, view: ({ event }) => event.view }),
           enqueueActions(({ enqueue, event }) => {
             if (event.view === "budget") enqueue.spawnChild("loadSessions");
           }),
+        ],
+      },
+      "friends.toggle": {
+        actions: [
+          assign({ friendsOpen: ({ context }) => !context.friendsOpen }),
+          ({ context }) => deps.saveFriendsOpen(context.friendsOpen),
         ],
       },
       "presence.mode": {
@@ -529,12 +562,15 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         ),
       },
       opened: {
-        actions: assign({
-          windows: ({ context, event }) => {
-            const { [event.coordinate]: _, ...windows } = context.windows;
-            return { ...windows, [event.coordinate]: event.label };
-          },
-        }),
+        actions: [
+          assign({
+            windows: ({ context, event }) => {
+              const { [event.coordinate]: _, ...windows } = context.windows;
+              return { ...windows, [event.coordinate]: event.label };
+            },
+          }),
+          enqueueActions(({ enqueue }) => enqueue.spawnChild("loadSessions")),
+        ],
       },
       closed: {
         actions: assign({
@@ -548,6 +584,12 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         actions: ({ context, event }) => {
           const label = context.windows[event.game.coordinate];
           if (label) deps.checkGame(label);
+        },
+      },
+      quit: {
+        actions: ({ context, event }) => {
+          const label = context.windows[event.game.coordinate];
+          if (label) deps.closeGame(label);
         },
       },
       shim: {
@@ -647,6 +689,23 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
               }),
             },
           },
+        },
+      },
+      profile: {
+        initial: "waiting",
+        states: {
+          waiting: { always: { guard: ({ context }) => !!context.npub, target: "loading" } },
+          loading: {
+            invoke: {
+              src: "fetchProfile",
+              input: ({ context }) => pubkeyOf(context)!,
+              onDone: {
+                target: "ready",
+                actions: assign({ profile: ({ event }) => event.output }),
+              },
+            },
+          },
+          ready: {},
         },
       },
       presence: {
