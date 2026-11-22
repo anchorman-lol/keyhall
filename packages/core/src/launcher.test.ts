@@ -20,6 +20,7 @@ import {
   playing,
   running,
   sourceLabel,
+  unreachable,
   type BudgetSettings,
   type LauncherDeps,
   type LauncherEvent,
@@ -83,6 +84,8 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
       [game, spam].filter((g) => coordinates.includes(g.coordinate)),
     fetchGames: async () => [game, spam],
     saveSources: vi.fn(),
+    saveRelays: vi.fn(),
+    probeRelay: async () => true,
     fetchLastUpdated: async () => 200,
     openGame: async () => "game-1",
     checkGame: vi.fn(),
@@ -234,10 +237,17 @@ describe("library", () => {
     expect(actor.getSnapshot().context.sourceError).toBe("");
   });
 
-  it("treats a source whose relays fail as empty", async () => {
+  it("treats a source whose relays fail as empty and blames the relays", async () => {
     const { actor } = start({ fetchLists: () => Promise.reject(new Error("offline")) });
     await waitFor(actor, loaded);
     expect(library(actor.getSnapshot().context)).toEqual([]);
+    expect(unreachable(actor.getSnapshot().context)).toBe(true);
+  });
+
+  it("doesn't blame the relays for an empty source that loaded", async () => {
+    const { actor } = start({ fetchLists: async () => [] });
+    await waitFor(actor, loaded);
+    expect(unreachable(actor.getSnapshot().context)).toBe(false);
   });
 
   it("selects a game and goes back to all games", () => {
@@ -684,5 +694,66 @@ describe("budget", () => {
     expect(actor.getSnapshot().matches({ budget: "idle" })).toBe(true);
     expect(noWallet.actor.getSnapshot().matches({ budget: "idle" })).toBe(true);
     expect(pay).not.toHaveBeenCalled();
+  });
+});
+
+describe("relays", () => {
+  const loaded = (s: { context: { loading: string[] } }) => s.context.loading.length === 0;
+  const url = "wss://relay.example.com";
+
+  it("starts with saved relays and checks each switched-on one", async () => {
+    const probeRelay = vi.fn(async (u: string) => u === url);
+    const saved = [
+      { url, enabled: true, read: ["listings" as const], write: [] },
+      { url: "wss://down.example", enabled: true, read: [], write: [] },
+      { url: "wss://off.example", enabled: false, read: [], write: [] },
+    ];
+    const { actor } = start({ probeRelay }, { relays: saved });
+    await waitFor(actor, (s) => Object.keys(s.context.relayStatus).length === 2);
+    await waitFor(actor, (s) => !Object.values(s.context.relayStatus).includes("checking"));
+    expect(actor.getSnapshot().context.relays).toEqual(saved);
+    expect(actor.getSnapshot().context.relayStatus).toEqual({
+      [url]: "connected",
+      "wss://down.example": "failed",
+    });
+  });
+
+  it("adds a relay, saves it and fetches the library again", async () => {
+    const fetchLists = vi.fn<LauncherDeps["fetchLists"]>(() =>
+      Promise.reject(new Error("offline")),
+    );
+    const { actor, deps } = start({ fetchLists }, { relays: [] });
+    await waitFor(actor, loaded);
+    expect(unreachable(actor.getSnapshot().context)).toBe(true);
+    fetchLists.mockImplementation(async (ref: ListRef) => [listOf(ref, [game])]);
+    actor.send({ type: "relay.add", input: "relay.example.com" });
+    await waitFor(actor, loaded);
+    expect(deps.saveRelays).toHaveBeenLastCalledWith([expect.objectContaining({ url })]);
+    expect(fetchLists).toHaveBeenCalledTimes(2);
+    expect(library(actor.getSnapshot().context)).toEqual([{ game, from: [PICKS_ID] }]);
+    expect(unreachable(actor.getSnapshot().context)).toBe(false);
+  });
+
+  it("rejects an address that isn't a wss relay", () => {
+    const { actor, deps } = start({}, { relays: [] });
+    actor.send({ type: "relay.add", input: "https://example.com" });
+    expect(actor.getSnapshot().context.relayError).toMatch(/wss:\/\//);
+    expect(deps.saveRelays).not.toHaveBeenCalled();
+    actor.send({ type: "relay.add", input: url });
+    expect(actor.getSnapshot().context.relayError).toBe("");
+  });
+
+  it("switches a relay off, routes its reads and removes it, saving each change", async () => {
+    const relay = { url, enabled: true, read: ["listings" as const], write: [] };
+    const { actor, deps } = start({}, { relays: [relay] });
+    await waitFor(actor, loaded);
+    actor.send({ type: "relay.toggle", url });
+    expect(deps.saveRelays).toHaveBeenLastCalledWith([{ ...relay, enabled: false }]);
+    actor.send({ type: "relay.use", url, use: "social", on: true });
+    expect(deps.saveRelays).toHaveBeenLastCalledWith([
+      { ...relay, enabled: false, read: ["listings", "social"] },
+    ]);
+    actor.send({ type: "relay.remove", url });
+    expect(deps.saveRelays).toHaveBeenLastCalledWith([]);
   });
 });

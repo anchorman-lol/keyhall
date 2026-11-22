@@ -6,7 +6,15 @@ import {
   type Filters,
   type Sort,
 } from "@keyhall/core/filters";
-import { depthOf, library, playing, running, signInOf, updatedAt } from "@keyhall/core/launcher";
+import {
+  depthOf,
+  library,
+  playing,
+  running,
+  signInOf,
+  unreachable,
+  updatedAt,
+} from "@keyhall/core/launcher";
 import type { Game } from "@keyhall/core/listing";
 import { sourceList } from "@keyhall/core/sources";
 import { Button } from "@keyhall/ui/components/button";
@@ -16,6 +24,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@keyhall/ui/components/
 import { Switch } from "@keyhall/ui/components/switch";
 import { cn } from "@keyhall/ui/lib/utils";
 import {
+  BroadcastIcon,
   CaretDownIcon,
   CheckIcon,
   FunnelSimpleIcon,
@@ -29,6 +38,7 @@ import { SignInBadge, verifiers } from "./badges.tsx";
 import { FriendsPlaying } from "./Friends.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
 import { Launcher, minutes, useNow } from "./launcher.ts";
+import { RelayToggles } from "./Relays.tsx";
 import { Sources } from "./Sources.tsx";
 
 export function Cover({ game, className }: { game: Game; className: string }) {
@@ -123,7 +133,7 @@ function Toolbar({
   filters: Filters;
   setFilters: (f: Filters) => void;
 }) {
-  const { sources, npub } = Launcher.useSelector((s) => s.context);
+  const { sources, npub, relays } = Launcher.useSelector((s) => s.context);
   const set = (f: Partial<Filters>) => setFilters({ ...filters, ...f });
   const on = sourceList(sources).filter((s) => s.enabled).length;
   const active = activeFilters(filters);
@@ -157,6 +167,19 @@ function Toolbar({
             <div className="py-1.5">
               <Sources />
             </div>
+          </Menu>
+          <Menu
+            trigger={
+              <>
+                <BroadcastIcon data-icon="inline-start" />
+                Relays
+                <span className="text-muted-foreground tabular-nums">
+                  {relays.filter((r) => r.enabled).length}/{relays.length}
+                </span>
+              </>
+            }
+          >
+            <RelayToggles />
           </Menu>
           <Menu
             trigger={
@@ -285,7 +308,23 @@ export function Library({
     <main className="flex h-full min-h-0 flex-col">
       <Toolbar count={games.length} filters={filters} setFilters={setFilters} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {!entries.length ? (
+        {!entries.length && !context.loading.length && unreachable(context) ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>Couldn't reach your relays</EmptyTitle>
+              <EmptyDescription>
+                None of the relays your sources read from answered. Switch others on or add one.
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => send({ type: "view", view: "relays" })}
+            >
+              Open relay settings
+            </Button>
+          </Empty>
+        ) : !entries.length ? (
           <Empty>
             <EmptyHeader>
               <EmptyTitle>

@@ -40,6 +40,15 @@ import {
   type Source,
   type SourceSettings,
 } from "./sources";
+import {
+  addRelay,
+  removeRelay,
+  setUse,
+  toggleRelay,
+  DEFAULT_RELAYS,
+  type Relay,
+  type Use,
+} from "./relaySettings";
 import { payments, type Payment } from "./zap";
 
 export interface ShimCall {
@@ -72,6 +81,8 @@ export interface LauncherDeps extends PresenceDeps {
   fetchListings(coordinates: string[]): Promise<Game[]>;
   fetchGames(): Promise<Game[]>;
   saveSources(sources: SourceSettings): void;
+  saveRelays(relays: Relay[]): void;
+  probeRelay(url: string): Promise<boolean>;
   fetchLastUpdated(game: Game): Promise<number>;
   openGame(game: Game): Promise<string>;
   checkGame(label: string): void;
@@ -103,6 +114,7 @@ export interface Stored {
   presence: PresenceSettings;
   circle: Circle;
   sources: SourceSettings;
+  relays: Relay[];
   budget: BudgetSettings;
   friendsOpen: boolean;
 }
@@ -115,6 +127,10 @@ export interface Fetched {
 export interface LauncherContext {
   sources: SourceSettings;
   sourceError: string;
+  failed: string[];
+  relays: Relay[];
+  relayError: string;
+  relayStatus: Record<string, "checking" | "connected" | "failed">;
   fetched: Record<string, Fetched>;
   listings: Record<string, Game>;
   loading: string[];
@@ -130,7 +146,7 @@ export interface LauncherContext {
   labelError: string;
   keyWarnings: string[];
   current?: Game;
-  view?: "budget" | "settings";
+  view?: View;
   friends?: Friend[];
   friendsOpen: boolean;
   profile?: Friend;
@@ -145,6 +161,8 @@ export interface LauncherContext {
   payErrors: Record<string, string>;
 }
 
+export type View = "budget" | "settings" | "relays";
+
 type Events =
   | LauncherEvent
   | { type: "key.create" }
@@ -158,9 +176,14 @@ type Events =
   | { type: "source.toggle"; id: string }
   | { type: "source.add"; input: string }
   | { type: "source.remove"; id: string }
-  | { type: "source.loaded"; id: string; lists: CuratorList[]; games: Game[] }
+  | { type: "source.loaded"; id: string; lists: CuratorList[]; games: Game[]; failed?: boolean }
+  | { type: "relay.add"; input: string }
+  | { type: "relay.remove"; url: string }
+  | { type: "relay.toggle"; url: string }
+  | { type: "relay.use"; url: string; use: Use; on: boolean }
+  | { type: "relay.status"; url: string; ok: boolean }
   | { type: "updated"; coordinate: string; time: number }
-  | { type: "view"; view: "budget" | "settings" }
+  | { type: "view"; view: View }
   | { type: "friends.toggle" }
   | { type: "presence.mode"; mode: PresenceMode }
   | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
@@ -201,6 +224,9 @@ export function sourceLabel(context: LauncherContext, id: string) {
   const npub = ref ? npubEncode(ref.pubkey) : id;
   return titles || `${npub.slice(0, 10)}…${npub.slice(-4)}`;
 }
+
+export const unreachable = (context: LauncherContext) =>
+  sourceList(context.sources).some((s) => s.enabled && context.failed.includes(s.id));
 
 export const library = (context: LauncherContext) => {
   const sources = sourceList(context.sources);
@@ -305,6 +331,8 @@ export const signInOf = (context: LauncherContext, game: Game) =>
 export const depthOf = (context: LauncherContext, game: Game) =>
   depthVerdict(game.depth, claims(context, game, "depth"), context.observed[game.coordinate]);
 
+const relaysChanged = ["saveRelays", "probeRelays", "refetch", "fetchSources"] as const;
+
 export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
   setup({
     types: {} as { context: LauncherContext; events: Events },
@@ -316,8 +344,13 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       ),
       fetchSource: fromCallback<Events, Source>(({ input, sendBack }) => {
         void fetchSource(input, deps)
-          .catch(() => ({ lists: [], games: [] }))
+          .catch(() => ({ lists: [], games: [], failed: true }))
           .then((result) => sendBack({ type: "source.loaded", id: input.id, ...result }));
+      }),
+      probeRelay: fromCallback<Events, string>(({ input, sendBack }) => {
+        void deps
+          .probeRelay(input)
+          .then((ok) => sendBack({ type: "relay.status", url: input, ok }));
       }),
       fetchUpdates: fromCallback<Events, Game[]>(({ input, sendBack }) => {
         void (async () => {
@@ -383,6 +416,18 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
     actions: {
       saveObserved: ({ context }) => deps.saveObserved(context.observed),
       saveSources: ({ context }) => deps.saveSources(context.sources),
+      saveRelays: ({ context }) => deps.saveRelays(context.relays),
+      probeRelays: enqueueActions(({ context, enqueue }) => {
+        const unchecked = context.relays.filter((r) => r.enabled && !context.relayStatus[r.url]);
+        for (const { url } of unchecked) enqueue.spawnChild("probeRelay", { input: url });
+        enqueue.assign({
+          relayStatus: {
+            ...context.relayStatus,
+            ...Object.fromEntries(unchecked.map((r) => [r.url, "checking" as const])),
+          },
+        });
+      }),
+      refetch: assign({ fetched: {}, failed: [], loading: [] }),
       fetchSources: enqueueActions(({ context, enqueue }) => {
         const wanted = sourceList(context.sources).filter(
           (s) => s.enabled && !context.fetched[s.id] && !context.loading.includes(s.id),
@@ -400,6 +445,10 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
     context: {
       sources: stored.sources ?? defaultSources,
       sourceError: "",
+      failed: [],
+      relays: stored.relays ?? DEFAULT_RELAYS,
+      relayError: "",
+      relayStatus: {},
       fetched: {},
       listings: {},
       loading: [],
@@ -425,7 +474,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       keyWarnings: [],
     },
     invoke: { src: "listen" },
-    entry: "fetchSources",
+    entry: ["probeRelays", "fetchSources"],
     on: {
       "source.toggle": {
         actions: [
@@ -452,6 +501,53 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           "saveSources",
         ],
       },
+      "relay.add": [
+        {
+          guard: ({ context, event }) => addRelay(context.relays, event.input) === context.relays,
+          actions: assign({ relayError: "" }),
+        },
+        {
+          guard: ({ context, event }) => !addRelay(context.relays, event.input),
+          actions: assign({ relayError: "Enter a relay address starting with wss://" }),
+        },
+        {
+          actions: [
+            assign({
+              relays: ({ context, event }) => addRelay(context.relays, event.input)!,
+              relayError: "",
+            }),
+            ...relaysChanged,
+          ],
+        },
+      ],
+      "relay.remove": {
+        actions: [
+          assign({ relays: ({ context, event }) => removeRelay(context.relays, event.url) }),
+          ...relaysChanged,
+        ],
+      },
+      "relay.toggle": {
+        actions: [
+          assign({ relays: ({ context, event }) => toggleRelay(context.relays, event.url) }),
+          ...relaysChanged,
+        ],
+      },
+      "relay.use": {
+        actions: [
+          assign({
+            relays: ({ context, event }) => setUse(context.relays, event.url, event.use, event.on),
+          }),
+          ...relaysChanged,
+        ],
+      },
+      "relay.status": {
+        actions: assign({
+          relayStatus: ({ context, event }) => ({
+            ...context.relayStatus,
+            [event.url]: event.ok ? "connected" : "failed",
+          }),
+        }),
+      },
       "source.loaded": {
         actions: enqueueActions(({ context, event, enqueue }) => {
           const fresh = event.games.filter((g) => !context.listings[g.coordinate]);
@@ -460,6 +556,9 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           );
           enqueue.assign({
             loading: context.loading.filter((id) => id !== event.id),
+            failed: event.failed
+              ? [...context.failed, event.id]
+              : context.failed.filter((id) => id !== event.id),
             fetched: {
               ...context.fetched,
               [event.id]: { lists: event.lists, games: event.games.map((g) => g.coordinate) },

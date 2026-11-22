@@ -52,7 +52,7 @@ Each game window gets a capability added at runtime, scoped to that window and t
 A pnpm workspace:
 
 - `apps/desktop`: the Tauri 2 app, a React UI and the Rust host (`src-tauri`: keychain, signer, game windows, play-time meter, NWC wallet).
-- `packages/core`: listing and curator-list parsing (`curation.ts`), the games catalog and the picks events (`catalog.ts`, published by `scripts/picks.ts`), curator labels and badge verdicts (`labels.ts`), source settings and their union (`sources.ts`), badges, depth classification, the `window.nostr` shim, relay queries, presence, the budget split, zaps and the launcher's XState machine (key setup, library, game windows, signing approvals, friends, presence, budget payments).
+- `packages/core`: listing and curator-list parsing (`curation.ts`), the games catalog and the picks events (`catalog.ts`, published by `scripts/picks.ts` to the default relays), curator labels and badge verdicts (`labels.ts`), source settings and their union (`sources.ts`), relay settings and per-use routing (`relaySettings.ts`), badges, depth classification, the `window.nostr` shim, relay queries, presence, the budget split, zaps and the launcher's XState machine (key setup, library, game windows, signing approvals, friends, presence, budget payments).
 - `packages/ui`: shadcn components (Base UI, Phosphor icons) and the Tailwind theme.
 
 ```sh

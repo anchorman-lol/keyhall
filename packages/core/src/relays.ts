@@ -5,31 +5,45 @@ import { listsFor, type CuratorList, type ListRef } from "./curation";
 import { AUTH_NS, DEPTH_NS, parseLabels, type Label } from "./labels";
 import { lastUpdated, parseListings, type Game } from "./listing";
 import { parseProfile, type Friend } from "./presence";
+import { DEFAULT_RELAYS, relaysFor, writeUseOf, type ReadUse, type Relay } from "./relaySettings";
 import { payOverNwc, zapInvoice, type Payment, type WalletRequest } from "./zap";
 
-export const RELAYS = [
-  "wss://relay.damus.io",
-  "wss://nos.lol",
-  "wss://relay.primal.net",
-  "wss://relay.ditto.pub",
-];
-const REPO_RELAYS = [...RELAYS, "wss://relay.ngit.dev"];
 const pool = new SimplePool();
+let settings = DEFAULT_RELAYS;
+
+export const setRelays = (relays: Relay[]) => void (settings = relays);
+
+export const probeRelay = (url: string) =>
+  pool.ensureRelay(url, { connectionTimeout: 5000 }).then(
+    () => true,
+    () => false,
+  );
+
+async function reachable(use: ReadUse, extra: string[] = []) {
+  const urls = [...new Set([...extra, ...relaysFor(settings, use)])];
+  const ok = await Promise.all(urls.map(probeRelay));
+  if (!ok.includes(true)) throw new Error("Couldn't reach your relays");
+  return urls.filter((_, i) => ok[i]);
+}
+
+const query = async (use: ReadUse, filter: Filter, maxWait: number, extra?: string[]) =>
+  pool.querySync(await reachable(use, extra), filter, { maxWait });
 
 export async function fetchGames(): Promise<Game[]> {
-  const events = await pool.querySync(
-    RELAYS,
+  const events = await query(
+    "listings",
     { kinds: [31990], "#t": ["game", "games", "Game", "Games"] },
-    { maxWait: 6000 },
+    6000,
   );
   return parseListings(events);
 }
 
 export async function fetchLists(ref: ListRef): Promise<CuratorList[]> {
-  const events = await pool.querySync(
-    [...new Set([...(ref.relays ?? []), ...RELAYS])],
+  const events = await query(
+    "lists",
     { kinds: [30267], authors: [ref.pubkey], ...(ref.d !== undefined && { "#d": [ref.d] }) },
-    { maxWait: 6000 },
+    6000,
+    ref.relays,
   );
   return listsFor(ref, events);
 }
@@ -37,22 +51,22 @@ export async function fetchLists(ref: ListRef): Promise<CuratorList[]> {
 export async function fetchListings(coordinates: string[]): Promise<Game[]> {
   if (!coordinates.length) return [];
   const parts = coordinates.map((c) => c.split(":"));
-  const events = await pool.querySync(
-    RELAYS,
+  const events = await query(
+    "listings",
     {
       kinds: [31990],
       authors: [...new Set(parts.map((p) => p[1]!))],
       "#d": [...new Set(parts.map((p) => p[2]!))],
     },
-    { maxWait: 6000 },
+    6000,
   );
   return parseListings(events, true).filter((g) => coordinates.includes(g.coordinate));
 }
 
 export async function fetchFriends(pubkey: string): Promise<Friend[]> {
-  const [contacts] = (
-    await pool.querySync(RELAYS, { kinds: [3], authors: [pubkey] }, { maxWait: 4000 })
-  ).sort((a, b) => b.created_at - a.created_at);
+  const [contacts] = (await query("social", { kinds: [3], authors: [pubkey] }, 4000)).sort(
+    (a, b) => b.created_at - a.created_at,
+  );
   const follows = [
     ...new Set(contacts?.tags.filter((t) => t[0] === "p" && t[1]).map((t) => t[1]!)),
   ];
@@ -61,7 +75,7 @@ export async function fetchFriends(pubkey: string): Promise<Friend[]> {
 
 async function fetchProfiles(pubkeys: string[]): Promise<Friend[]> {
   const profiles = new Map<string, Event>();
-  for (const e of await pool.querySync(RELAYS, { kinds: [0], authors: pubkeys }, { maxWait: 4000 }))
+  for (const e of await query("social", { kinds: [0], authors: pubkeys }, 4000))
     if ((profiles.get(e.pubkey)?.created_at ?? 0) < e.created_at) profiles.set(e.pubkey, e);
   return pubkeys.map((pubkey) => parseProfile(pubkey, profiles.get(pubkey)));
 }
@@ -69,18 +83,18 @@ async function fetchProfiles(pubkeys: string[]): Promise<Friend[]> {
 export const fetchProfile = async (pubkey: string) => (await fetchProfiles([pubkey]))[0]!;
 
 export const subscribe = (filter: Filter, onevent: (event: Event) => void) => {
-  const sub = pool.subscribeMany(RELAYS, filter, { onevent });
+  const sub = pool.subscribeMany(relaysFor(settings, "social"), filter, { onevent });
   return () => sub.close();
 };
 
 export const publish = async (event: Event) =>
-  void (await Promise.any(pool.publish(RELAYS, event)));
+  void (await Promise.any(pool.publish(relaysFor(settings, writeUseOf(event.kind)), event)));
 
 export async function fetchLabels(curators: string[]): Promise<Label[]> {
-  const events = await pool.querySync(
-    RELAYS,
+  const events = await query(
+    "lists",
     { kinds: [1985], authors: curators, "#L": [AUTH_NS, DEPTH_NS] },
-    { maxWait: 6000 },
+    6000,
   );
   return parseLabels(events);
 }
@@ -98,11 +112,12 @@ export async function fetchLastUpdated(game: Game): Promise<number> {
   for (const coordinate of game.repos) {
     const [, author, d] = coordinate.split(":");
     if (!author || !d) continue;
-    const events = await pool.querySync(
-      REPO_RELAYS,
+    const events = await query(
+      "listings",
       { kinds: [30617, 30618], authors: [author], "#d": [d] },
-      { maxWait: 4000 },
-    );
+      4000,
+      ["wss://relay.ngit.dev"],
+    ).catch(() => []);
     times.push(...events.filter((e) => e.kind === 30618).map((e) => e.created_at));
     const repo = events
       .flatMap((e) => e.tags)
@@ -120,7 +135,11 @@ export async function fetchLastUpdated(game: Game): Promise<number> {
 }
 
 async function fetchLud16(pubkey: string): Promise<string | undefined> {
-  const profile = await pool.get(RELAYS, { kinds: [0], authors: [pubkey] }, { maxWait: 4000 });
+  const profile = await pool.get(
+    relaysFor(settings, "social"),
+    { kinds: [0], authors: [pubkey] },
+    { maxWait: 4000 },
+  );
   try {
     const { lud16 } = JSON.parse(profile?.content ?? "{}") as Record<string, unknown>;
     return typeof lud16 === "string" ? lud16 : undefined;
@@ -139,6 +158,11 @@ export async function zap(
 ) {
   const lud16 = payment.lud16 ?? (await fetchLud16(payment.pubkey));
   if (!lud16) throw new Error("The developer's profile has no lightning address");
-  const invoice = await zapInvoice(fetch, { ...payment, lud16 }, comment, RELAYS);
+  const invoice = await zapInvoice(
+    fetch,
+    { ...payment, lud16 },
+    comment,
+    relaysFor(settings, "zaps"),
+  );
   await payOverNwc(await wallet.request(invoice), pool, wallet.result);
 }
