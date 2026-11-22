@@ -64,7 +64,7 @@ pnpm lint && pnpm fmt:check
 pnpm gate                # all of the above, cargo test and pnpm build (Keyhall.app)
 ```
 
-Unsigned builds change their code signature on every rebuild, so macOS asks for keychain access again for a key a previous build stored.
+Unsigned builds change their code signature on every rebuild, so macOS asks for keychain access again for a key a previous build stored. To keep "Always Allow" across rebuilds, run `scripts/local-signing-identity.sh` once: it creates a self-signed "Keyhall Local Dev" code-signing certificate in your login keychain, and `pnpm build` signs with it whenever it exists. It's for local builds only.
 
 ## Next steps
 
@@ -74,3 +74,4 @@ Unsigned builds change their code signature on every rebuild, so macOS asks for 
 - `nip44` in the shim, per-kind scopes from the listing's `k` tags, guest keys per game.
 - Native games on desktop through a built-in NIP-46 bunker, Windows and Linux key stores, and mobile.
 - Switching or removing the stored key.
+- Developer ID signing, notarization and the data-protection keychain before shipping builds.

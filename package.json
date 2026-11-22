@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @keyhall/desktop tauri dev",
-    "build": "pnpm --filter @keyhall/desktop tauri build",
+    "build": "scripts/build.sh",
     "test": "turbo test",
     "check-types": "turbo check-types",
     "lint": "oxlint --deny-warnings",
