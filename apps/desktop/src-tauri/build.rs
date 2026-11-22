@@ -6,6 +6,7 @@ fn main() {
             "import_key",
             "open_game",
             "check_game",
+            "close_game",
             "answer_sign_request",
             "sign_event",
             "nip44_encrypt",

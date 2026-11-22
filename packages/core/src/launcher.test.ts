@@ -18,6 +18,7 @@ import {
   library,
   monthSplit,
   playing,
+  running,
   sourceLabel,
   type BudgetSettings,
   type LauncherDeps,
@@ -85,6 +86,7 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     fetchLastUpdated: async () => 200,
     openGame: async () => "game-1",
     checkGame: vi.fn(),
+    closeGame: vi.fn(),
     answer: vi.fn(),
     listen: (send) => {
       emit = send;
@@ -244,19 +246,42 @@ describe("library", () => {
     expect(actor.getSnapshot().context.current).toBeUndefined();
   });
 
-  it("opens a game window, then tests sign-in in it", async () => {
+  it("opens a game window, then tests sign-in in it and quits it", async () => {
     const { actor, deps } = start();
     actor.send({ type: "play", game });
     await waitFor(actor, (s) => s.context.windows[game.coordinate] === "game-1");
     actor.send({ type: "check", game });
     expect(deps.checkGame).toHaveBeenCalledWith("game-1");
+    actor.send({ type: "quit", game });
+    expect(deps.closeGame).toHaveBeenCalledWith("game-1");
+  });
+
+  it("says since when each open game runs, from fresh play time", async () => {
+    const sessions = vi.fn(async () => [
+      { coordinate: game.coordinate, start: 10, end: 20 },
+      { coordinate: game.coordinate, start: 50, end: 60 },
+    ]);
+    const { actor } = start({ sessions });
+    actor.send({ type: "select", game });
+    await waitFor(actor, (s) => s.context.sessions.length > 0);
+    expect(running(actor.getSnapshot().context)).toEqual([]);
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => running(s.context).length > 0);
+    expect(running(actor.getSnapshot().context)).toEqual([{ game, since: 50 }]);
+    expect(sessions).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("signer", () => {
   it("asks about one sign request at a time and passes the answer on", async () => {
     const { actor, deps, emit } = start();
-    const request = (id: number) => ({ id, game: "Blockstr", kind: 1, content: "" });
+    const request = (id: number) => ({
+      id,
+      game: "Blockstr",
+      coordinate: game.coordinate,
+      kind: 1,
+      content: "",
+    });
     emit({ type: "sign-request", request: request(1) });
     emit({ type: "sign-request", request: request(2) });
     expect(actor.getSnapshot().matches({ signer: "asking" })).toBe(true);
