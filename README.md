@@ -4,7 +4,16 @@ A launcher and library for Nostr games. Every game you play opens in its own win
 
 Early work in progress: this is v0, desktop (macOS) first.
 
-![The Keyhall launcher beside a Blockstr window whose sign-in it verified](docs/screenshot.png)
+![The library: Keyhall picks as a cover grid with sign-in badges, and the friends column showing who is playing what](docs/ui/readme-library.webp)
+
+|                                                                                                                                   |                                                                                                       |
+| --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| ![A game page while the game runs: play time, budget share, friends in the game and sign-in trust](docs/ui/readme-game-page.webp) | ![The blocking prompt when a game first asks to sign an event kind](docs/ui/readme-sign-request.webp) |
+| ![The monthly budget split by play time, ready to pay over Nostr Wallet Connect](docs/ui/readme-budget.webp)                      | ![Settings: presence visibility and relays](docs/ui/readme-settings.webp)                             |
+
+## Download
+
+Every push to `main` publishes a [release](https://github.com/anchorman-lol/keyhall/releases/latest) with a `.dmg` for Apple Silicon Macs. Builds aren't signed with a Developer ID or notarized yet, so macOS says the app is damaged or from an unidentified developer: right-click Keyhall.app and choose Open, or run `xattr -dr com.apple.quarantine /Applications/Keyhall.app`.
 
 ## What v0 does
 

@@ -38,7 +38,7 @@ Rust tests alone: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
 
 ## House rules
 
-- **Gate locally.** anchorman-lol has no GitHub CI. The gate is `pnpm gate`, run once per final head through `reeve heavy`, and PR bodies quote its result.
+- **Gate locally.** The only GitHub workflow is `release.yml`, which builds the app and publishes a date-tagged release on every push to main; nothing gates PRs. The gate is `pnpm gate`, run once per final head through `reeve heavy`, and PR bodies quote its result.
 - **Lint and format** with oxlint and oxfmt only (no ESLint, Prettier or Biome).
 - **TDD in `packages/core`.** Write the failing vitest first. Keep relay, Tauri and storage access injected so the machine is testable; `signer.testing.ts` gives a real nostr-tools signer for tests.
 - **UI verification.** Screenshots may run the Vite app in headless Chromium with Tauri IPC mocked and a fake relay. Anything touching relays, sources or the library must also be run once against real relays before the PR. Screenshots for PRs go under `docs/ui/`; scratch output goes to `~/work/reports/<branch>/`, not the repo.

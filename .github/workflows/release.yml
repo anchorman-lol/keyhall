@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    branches: [main, worktree-keyhall-readme-release]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @keyhall/desktop tauri build --bundles app,dmg
+      - name: Pick the tag
+        id: tag
+        run: |
+          tag="v$(date -u +%Y.%m.%d)"
+          n=$(git tag -l "$tag" "$tag.*" | wc -l | tr -d ' ')
+          if [ "$n" -gt 0 ]; then tag="$tag.$((n + 1))"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          mv apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg "Keyhall_${tag}_aarch64.dmg"
+      - name: Publish the release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release create "$TAG" "Keyhall_${TAG}_aarch64.dmg" \
+            --target "$GITHUB_SHA" --title "Keyhall $TAG" --generate-notes \
+            --notes "Apple Silicon build. It isn't signed with a Developer ID or notarized yet, so macOS will refuse to open it at first: right-click Keyhall.app and choose Open, or run \`xattr -dr com.apple.quarantine /Applications/Keyhall.app\`."
