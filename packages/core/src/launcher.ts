@@ -51,6 +51,7 @@ export interface ShimCall {
 export interface SignRequest {
   id: number;
   game: string;
+  coordinate: string;
   kind: number;
   content: string;
 }
@@ -74,6 +75,7 @@ export interface LauncherDeps extends PresenceDeps {
   fetchLastUpdated(game: Game): Promise<number>;
   openGame(game: Game): Promise<string>;
   checkGame(label: string): void;
+  closeGame(label: string): void;
   answer(id: number, allow: boolean): void;
   listen(send: (event: LauncherEvent) => void): () => void;
   saveObserved(observed: Record<string, Observation>): void;
@@ -146,6 +148,7 @@ type Events =
   | { type: "play"; game: Game }
   | { type: "opened"; coordinate: string; label: string }
   | { type: "check"; game: Game }
+  | { type: "quit"; game: Game }
   | { type: "answer"; allow: boolean }
   | { type: "source.toggle"; id: string }
   | { type: "source.add"; input: string }
@@ -254,6 +257,13 @@ export function playing(context: LauncherContext, now = Date.now() / 1000) {
     return status && status.expires > now ? [{ friend, status }] : [];
   });
 }
+
+export const running = (context: LauncherContext) =>
+  Object.keys(context.windows).flatMap((coordinate) => {
+    const game = findGame(context, coordinate);
+    const since = context.sessions.findLast((s) => s.coordinate === coordinate)?.start;
+    return game ? [{ game, since }] : [];
+  });
 
 export function monthSplit(context: LauncherContext, month: string) {
   const games = Object.values(context.listings);
@@ -478,7 +488,14 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           updated: ({ context, event }) => ({ ...context.updated, [event.coordinate]: event.time }),
         }),
       },
-      select: { actions: assign({ current: ({ event }) => event.game, view: undefined }) },
+      select: {
+        actions: [
+          assign({ current: ({ event }) => event.game, view: undefined }),
+          enqueueActions(({ enqueue, event }) => {
+            if (event.game) enqueue.spawnChild("loadSessions");
+          }),
+        ],
+      },
       view: {
         actions: [
           assign({ current: undefined, view: ({ event }) => event.view }),
@@ -529,12 +546,15 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         ),
       },
       opened: {
-        actions: assign({
-          windows: ({ context, event }) => {
-            const { [event.coordinate]: _, ...windows } = context.windows;
-            return { ...windows, [event.coordinate]: event.label };
-          },
-        }),
+        actions: [
+          assign({
+            windows: ({ context, event }) => {
+              const { [event.coordinate]: _, ...windows } = context.windows;
+              return { ...windows, [event.coordinate]: event.label };
+            },
+          }),
+          enqueueActions(({ enqueue }) => enqueue.spawnChild("loadSessions")),
+        ],
       },
       closed: {
         actions: assign({
@@ -548,6 +568,12 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         actions: ({ context, event }) => {
           const label = context.windows[event.game.coordinate];
           if (label) deps.checkGame(label);
+        },
+      },
+      quit: {
+        actions: ({ context, event }) => {
+          const label = context.windows[event.game.coordinate];
+          if (label) deps.closeGame(label);
         },
       },
       shim: {

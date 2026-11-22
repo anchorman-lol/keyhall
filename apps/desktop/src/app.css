@@ -2,3 +2,8 @@
 
 @source ".";
 @source "../../../packages/ui/src";
+
+@theme inline {
+  --color-online: oklch(0.78 0.16 152);
+  --color-ingame: oklch(0.8 0.13 230);
+}
