@@ -41,7 +41,7 @@ Rust tests alone: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
 - **Lint and format** with oxlint and oxfmt only (no ESLint, Prettier or Biome).
 - **TDD in `packages/core`.** Write the failing vitest first. Keep relay, Tauri and storage access injected so the machine is testable; `signer.testing.ts` gives a real nostr-tools signer for tests.
 - **UI verification.** Screenshots may run the Vite app in headless Chromium with Tauri IPC mocked and a fake relay. Anything touching relays, sources or the library must also be run once against real relays before the PR. Screenshots for PRs go under `docs/ui/`; scratch output goes to `~/work/reports/<branch>/`, not the repo.
-- **Local macOS signing.** Ad-hoc builds change their code signature on every rebuild, so macOS forgets keychain "Always Allow" and prompts again. Pending in #9 (`chore/local-signing`): `scripts/local-signing-identity.sh` creates a self-signed "Keyhall Local Dev" code-signing identity once, and `pnpm build` sets `APPLE_SIGNING_IDENTITY` to it so the designated requirement stays stable across rebuilds. Until it merges, expect keychain prompts after each build.
+- **Local macOS signing.** Ad-hoc builds change their code signature on every rebuild, so macOS forgets keychain "Always Allow" and prompts again. `scripts/local-signing-identity.sh` creates a self-signed "Keyhall Local Dev" code-signing identity once, and `pnpm build` sets `APPLE_SIGNING_IDENTITY` to it so the designated requirement stays stable across rebuilds. Developer ID signing, notarization and the data-protection keychain come before shipping builds.
 - Conventional commits, squash merges.
 
 ## Gotchas
