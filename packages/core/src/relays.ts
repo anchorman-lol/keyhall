@@ -7,7 +7,7 @@ import { lastUpdated, parseListings, type Game } from "./listing";
 import { parseProfile, type Friend } from "./presence";
 import { payOverNwc, zapInvoice, type Payment, type WalletRequest } from "./zap";
 
-const RELAYS = [
+export const RELAYS = [
   "wss://relay.damus.io",
   "wss://nos.lol",
   "wss://relay.primal.net",

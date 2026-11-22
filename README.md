@@ -8,7 +8,7 @@ Early work in progress: this is v0, desktop (macOS) first.
 
 ## What v0 does
 
-- Lists games as a cover grid from the sources you switch on in the Sources menu, with search, sort (name, recently updated, most played this month) and filters (signs through Keyhall, friends playing, updated in the last two weeks, Nostr depth). Each game shows its square icon, the listing's `picture`, beside its `banner` cover. “Keyhall picks”, the official list (NIP-51 app curation set, kind 30267, `d=games-default` under the project's key), is on by default. Add a curator by npub (all their lists tagged `t=games`) or one list by naddr. “Unvetted listings”, off by default, adds every NIP-89 handler event (kind 31990) tagged `t=game` or `t=games`. Each game shows which sources list it, and your sources are kept in local storage.
+- Lists games as a cover grid from the sources you switch on in the Sources menu, with search, sort (name, recently updated, most played this month) and filters (signs through Keyhall, friends playing, updated in the last two weeks, Nostr depth). Each game shows its square icon, the listing's `picture`, beside its `banner` cover. “Keyhall picks”, the official list (NIP-51 app curation set, kind 30267, `d=games-default` under the project's key), is on by default; its games are folders in [`games/`](games) and the list is [`picks.yaml`](picks.yaml). Add a curator by npub (all their lists tagged `t=games`) or one list by naddr. “Unvetted listings”, off by default, adds every NIP-89 handler event (kind 31990) tagged `t=game` or `t=games`. Each game shows which sources list it, and your sources are kept in local storage.
 - Shows a sign-in badge from the listing's `auth` tags (worst case wins), a Nostr depth badge (`multiplayer`, `identity` or `none`) and when the game was last updated.
 - Reads NIP-32 labels (kind 1985) from the curators of your enabled sources. A curator's label wins over the listing's tags and the badge gets a “verified by” seal; where the listing, curators and the game window disagree, the game page says who says what.
 - Opens each web game in its own window with an injected `window.nostr` (`getPublicKey`, `signEvent`). Rust answers both. The first time a game asks to sign an event kind, the launcher window comes to the front and blocks everything else until you allow or deny it; game windows can't answer that prompt. The running game sits at the bottom of the navigation rail with its play time, Show and Quit.
@@ -52,7 +52,7 @@ Each game window gets a capability added at runtime, scoped to that window and t
 A pnpm workspace:
 
 - `apps/desktop`: the Tauri 2 app, a React UI and the Rust host (`src-tauri`: keychain, signer, game windows, play-time meter, NWC wallet).
-- `packages/core`: listing and curator-list parsing (`curation.ts`), curator labels and badge verdicts (`labels.ts`), source settings and their union (`sources.ts`), badges, depth classification, the `window.nostr` shim, relay queries, presence, the budget split, zaps and the launcher's XState machine (key setup, library, game windows, signing approvals, friends, presence, budget payments).
+- `packages/core`: listing and curator-list parsing (`curation.ts`), the games catalog and the picks events (`catalog.ts`, published by `scripts/picks.ts`), curator labels and badge verdicts (`labels.ts`), source settings and their union (`sources.ts`), badges, depth classification, the `window.nostr` shim, relay queries, presence, the budget split, zaps and the launcher's XState machine (key setup, library, game windows, signing approvals, friends, presence, budget payments).
 - `packages/ui`: shadcn components (Base UI, Phosphor icons) and the Tailwind theme.
 
 ```sh
@@ -62,13 +62,16 @@ pnpm test                # vitest
 pnpm check-types
 pnpm lint && pnpm fmt:check
 pnpm gate                # all of the above, cargo test and pnpm build (Keyhall.app)
+pnpm picks:publish       # dry run of the picks listings and list; --publish sends what changed
 ```
+
+`pnpm picks:publish` signs a kind 31990 listing for each game folder without a `listing` (images from GitHub Pages) and the `games-default` list, all with the project key from the macOS keychain (service `lol.anchorman.keyhall.project`, account `picks`). It prints the signed events, how each differs from what's on the relays, and developer listings it found for games Keyhall still lists itself. `--publish` asks before sending. `--unsigned <id>` prints a game's listing unsigned, for a developer to sign with their own key.
 
 Unsigned builds change their code signature on every rebuild, so macOS asks for keychain access again for a key a previous build stored. To keep "Always Allow" across rebuilds, run `scripts/local-signing-identity.sh` once: it creates a self-signed "Keyhall Local Dev" code-signing certificate in your login keychain, and `pnpm build` signs with it whenever it exists. It's for local builds only.
 
 ## Next steps
 
-- Publish the Keyhall picks list (`games-default`) under the project's key (`PICKS_PUBKEY` in `packages/core/src/curation.ts`), sync sources as encrypted NIP-78 app data, and show games a list holds only as `r` URLs.
+- Sync sources as encrypted NIP-78 app data.
 - A private friends list (NIP-51 follow set) as an alternative to all follows, and keeping the circle key in the keychain instead of local storage.
 - Monthly budget: rolling small shares over to the next month, excluding games, credit-me-publicly zaps and syncing play time between devices.
 - `nip44` in the shim, per-kind scopes from the listing's `k` tags, guest keys per game.
