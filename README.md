@@ -68,7 +68,7 @@ Unsigned builds change their code signature on every rebuild, so macOS asks for 
 
 ## Next steps
 
-- Publish Keyhall picks under the project's key (`PICKS_PUBKEY` in `packages/core/src/curation.ts` is a placeholder until then), sync sources as encrypted NIP-78 app data, and show games a list holds only as `r` URLs.
+- Publish the Keyhall picks list (`games-default`) under the project's key (`PICKS_PUBKEY` in `packages/core/src/curation.ts`), sync sources as encrypted NIP-78 app data, and show games a list holds only as `r` URLs.
 - A private friends list (NIP-51 follow set) as an alternative to all follows, and keeping the circle key in the keychain instead of local storage.
 - Monthly budget: rolling small shares over to the next month, excluding games, credit-me-publicly zaps and syncing play time between devices.
 - `nip44` in the shim, per-kind scopes from the listing's `k` tags, guest keys per game.

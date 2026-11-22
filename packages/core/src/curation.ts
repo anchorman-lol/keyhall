@@ -3,8 +3,8 @@ import { isGame, tag, type NostrEvent } from "./listing";
 
 export const PICKS = "Keyhall picks";
 
-// PLACEHOLDER: not a real key. Replace with the Keyhall project's pubkey once it exists.
-export const PICKS_PUBKEY = "0".repeat(64);
+// npub1veczhnyw2tuuahcxu2tuskmkfs5pwpfnzy2pdvej9g3ux8gxyu2qy0evky
+export const PICKS_PUBKEY = "66702bcc8e52f9cedf06e297c85b764c28170533111416b3322a23c31d062714";
 
 export interface ListRef {
   pubkey: string;
