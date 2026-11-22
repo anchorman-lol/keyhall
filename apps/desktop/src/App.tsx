@@ -11,6 +11,7 @@ import { Nav } from "./Nav.tsx";
 import { PresenceSettings } from "./PresenceSettings.tsx";
 import { SignerLog } from "./SignerLog.tsx";
 import { SignRequest } from "./SignRequest.tsx";
+import { TitleBar } from "./TitleBar.tsx";
 
 function Settings() {
   const context = Launcher.useSelector((s) => s.context);
@@ -32,7 +33,8 @@ export function App() {
   const { current, view } = Launcher.useSelector((s) => s.context);
   const [filters, setFilters] = useState(NO_FILTERS);
   return (
-    <div className="grid h-screen grid-cols-[72px_minmax(0,1fr)_264px] text-[13px]">
+    <div className="grid h-screen grid-cols-[72px_minmax(0,1fr)_264px] grid-rows-[auto_minmax(0,1fr)] text-[13px]">
+      <TitleBar />
       <Nav />
       <div className="min-h-0 min-w-0">
         {view === "budget" ? (

@@ -6,7 +6,6 @@ import {
   AppWindowIcon,
   CoinsIcon,
   GearSixIcon,
-  KeyholeIcon,
   SquaresFourIcon,
   StopIcon,
   type Icon,
@@ -108,15 +107,11 @@ function RunningCard({ game, since }: { game: Game; since: number | undefined })
 export function Nav() {
   const context = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
-  const { view, npub } = context;
+  const { view } = context;
   return (
     <aside className="relative z-30 h-full">
       <div className="group/rail absolute inset-y-0 left-0 flex w-[72px] flex-col overflow-clip border-r border-white/[0.06] bg-sidebar px-4 transition-[width,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] has-[:focus-visible]:w-[232px] hover:w-[232px] hover:shadow-[16px_0_40px_-12px_rgba(0,0,0,0.65)] motion-reduce:transition-none">
-        <div className="flex h-[52px] shrink-0 items-center gap-3 pl-2">
-          <KeyholeIcon weight="fill" className="size-6 shrink-0 text-primary" />
-          <span className={cn("text-[15px] font-bold", fade)}>Keyhall</span>
-        </div>
-        <nav className="mt-1 grid grid-cols-1 gap-1">
+        <nav className="mt-1.5 grid grid-cols-1 gap-1">
           <Item
             icon={SquaresFourIcon}
             label="Library"
@@ -140,14 +135,6 @@ export function Nav() {
           {running(context).map(({ game, since }) => (
             <RunningCard key={game.coordinate} game={game} since={since} />
           ))}
-          {npub && (
-            <div className="flex h-8 items-center gap-3 pl-2" title={npub}>
-              <KeyholeIcon className="size-6 shrink-0 text-muted-foreground" />
-              <span className={cn("truncate font-mono text-[11px] text-muted-foreground", fade)}>
-                {npub.slice(0, 12)}…{npub.slice(-4)}
-              </span>
-            </div>
-          )}
         </div>
       </div>
     </aside>
