@@ -384,10 +384,30 @@ async fn sign_label(app: AppHandle, event: EventRequest) -> Result<Event, String
     signer::label(&keychain_task(app, Launcher::keys).await?, &event)
 }
 
+/// The launcher draws its window controls on the right of its title bar, like Steam.
+#[cfg(target_os = "macos")]
+fn hide_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+    // SAFETY: setup runs on the main thread and the pointer is the window's live NSWindow.
+    let ns_window = unsafe { &*window.ns_window()?.cast::<NSWindow>() };
+    for kind in [
+        NSWindowButton::CloseButton,
+        NSWindowButton::MiniaturizeButton,
+        NSWindowButton::ZoomButton,
+    ] {
+        if let Some(button) = ns_window.standardWindowButton(kind) {
+            button.setHidden(true);
+        }
+    }
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(Launcher::default())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            hide_traffic_lights(&app.get_webview_window("main").expect("main window"))?;
             let path = app.path().app_data_dir()?.join("playtime.json");
             app.manage(Mutex::new(Meter::load(path)));
             let handle = app.handle().clone();
