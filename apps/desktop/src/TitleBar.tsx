@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Launcher } from "./launcher.ts";
+import { UpdateNotice } from "./UpdateNotice.tsx";
 
 const VIEWS = { budget: "Monthly budget", settings: "Settings", relays: "Settings" };
 const CONTROLS = [
@@ -71,6 +72,7 @@ export function TitleBar() {
           <span className="px-1.5 text-foreground">Library</span>
         )}
       </nav>
+      <UpdateNotice />
       <button
         aria-label="Friends"
         aria-pressed={friendsOpen}

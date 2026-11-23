@@ -21,6 +21,7 @@ fn main() {
             "nostr_observe",
             "nostr_key_field",
             "sign_label",
+            "restart_to_update",
         ]),
     ))
     .expect("failed to run tauri-build");

@@ -109,6 +109,7 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     connectWallet: async () => "relay.example",
     pay: async () => {},
     saveBudget: vi.fn(),
+    restart: vi.fn(),
     ...deps,
   };
   const actor = createActor(launcherMachine(all, stored)).start();
@@ -281,6 +282,23 @@ describe("library", () => {
     await waitFor(actor, (s) => running(s.context).length > 0);
     expect(running(actor.getSnapshot().context)).toEqual([{ game, since: 50 }]);
     expect(sessions).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("update", () => {
+  it("offers a restart once an update is installed, but not while a game is open", async () => {
+    const restart = vi.fn();
+    const { actor, emit } = start({ restart });
+    expect(actor.getSnapshot().context.update).toBeUndefined();
+    emit({ type: "update-ready", version: "2026.1123.0" });
+    expect(actor.getSnapshot().context.update).toBe("2026.1123.0");
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => s.context.windows[game.coordinate] === "game-1");
+    actor.send({ type: "update.restart" });
+    expect(restart).not.toHaveBeenCalled();
+    emit({ type: "closed", coordinate: game.coordinate });
+    actor.send({ type: "update.restart" });
+    expect(restart).toHaveBeenCalledOnce();
   });
 });
 
