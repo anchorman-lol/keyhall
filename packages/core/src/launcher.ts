@@ -80,6 +80,7 @@ type KeyCommand = "generate_key" | "import_key";
 export interface LauncherDeps extends PresenceDeps {
   keyStatus(): Promise<string | null>;
   saveKey(command: KeyCommand, nsec?: string): Promise<string>;
+  forgetKey(): Promise<void>;
   fetchLists(ref: ListRef): Promise<CuratorList[]>;
   fetchListings(coordinates: string[]): Promise<Game[]>;
   fetchGames(): Promise<Game[]>;
@@ -174,6 +175,7 @@ type Events =
   | LauncherEvent
   | { type: "key.create" }
   | { type: "key.import"; nsec: string }
+  | { type: "key.signOut" }
   | { type: "select"; game?: Game }
   | { type: "play"; game: Game }
   | { type: "opened"; coordinate: string; label: string }
@@ -342,6 +344,11 @@ export const signInOf = (context: LauncherContext, game: Game) =>
 export const depthOf = (context: LauncherContext, game: Game) =>
   depthVerdict(game.depth, claims(context, game, "depth"), context.observed[game.coordinate]);
 
+const signedOut = {
+  guard: ({ context }: { context: LauncherContext }) => !context.npub,
+  target: "waiting",
+} as const;
+
 const relaysChanged = ["saveRelays", "probeRelays", "refetch", "fetchSources"] as const;
 
 export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
@@ -353,6 +360,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       saveKey: fromPromise<string, { command: KeyCommand; nsec?: string }>(({ input }) =>
         deps.saveKey(input.command, input.nsec),
       ),
+      forgetKey: fromPromise(() => deps.forgetKey()),
       fetchSource: fromCallback<Events, Source>(({ input, sendBack }) => {
         void fetchSource(input, deps)
           .catch(() => ({ lists: [], games: [], failed: true }))
@@ -790,7 +798,50 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
               },
             },
           },
-          ready: {},
+          ready: { on: { "key.signOut": "signingOut" } },
+          signingOut: {
+            entry: ({ context }) => {
+              for (const label of Object.values(context.windows)) deps.closeGame(label);
+            },
+            always: {
+              guard: ({ context }) => !Object.keys(context.windows).length && !context.published,
+              target: "forgetting",
+            },
+          },
+          forgetting: {
+            invoke: {
+              src: "forgetKey",
+              onDone: {
+                target: "setup",
+                actions: [
+                  assign({
+                    npub: null,
+                    keyError: "",
+                    calls: [],
+                    observed: {},
+                    requests: [],
+                    keyWarnings: [],
+                    friends: undefined,
+                    profile: undefined,
+                    profileEvent: undefined,
+                    profileError: "",
+                    statuses: {},
+                    presence: DEFAULT_PRESENCE,
+                    circle: undefined,
+                    published: undefined,
+                    current: undefined,
+                    view: undefined,
+                  }),
+                  "saveObserved",
+                  "savePresence",
+                ],
+              },
+              onError: {
+                target: "ready",
+                actions: assign({ keyError: ({ event }) => String(event.error) }),
+              },
+            },
+          },
         },
       },
       friends: {
@@ -798,6 +849,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         states: {
           waiting: { always: { guard: ({ context }) => !!context.npub, target: "loading" } },
           loading: {
+            always: signedOut,
             invoke: {
               src: "fetchFriends",
               input: ({ context }) => pubkeyOf(context)!,
@@ -809,6 +861,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
             },
           },
           ready: {
+            always: signedOut,
             invoke: {
               src: "watchFriends",
               input: ({ context }) => ({
@@ -824,6 +877,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         states: {
           waiting: { always: { guard: ({ context }) => !!context.npub, target: "loading" } },
           loading: {
+            always: signedOut,
             invoke: {
               src: "fetchProfileEvent",
               input: ({ context }) => pubkeyOf(context)!,
@@ -838,9 +892,11 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
             },
           },
           ready: {
+            always: signedOut,
             on: { "profile.edit": { target: "fetching", actions: assign({ profileError: "" }) } },
           },
           fetching: {
+            always: signedOut,
             on: { "profile.cancel": "ready" },
             invoke: {
               src: "fetchProfileEvent",
@@ -858,12 +914,14 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
             },
           },
           editing: {
+            always: signedOut,
             on: {
               "profile.save": { target: "saving", actions: assign({ profileError: "" }) },
               "profile.cancel": { target: "ready", actions: assign({ profileError: "" }) },
             },
           },
           saving: {
+            always: signedOut,
             invoke: {
               src: "saveProfile",
               input: ({ context, event }) => ({
@@ -1033,6 +1091,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
             always: { guard: ({ context }) => context.requests.length > 0, target: "asking" },
           },
           asking: {
+            always: { guard: ({ context }) => !context.requests.length, target: "idle" },
             on: {
               answer: {
                 target: "idle",

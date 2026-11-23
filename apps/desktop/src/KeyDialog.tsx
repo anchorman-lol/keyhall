@@ -1,8 +1,10 @@
 import { Button } from "@keyhall/ui/components/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -50,5 +52,43 @@ export function KeyDialog() {
         {error && <p className="text-sm text-destructive">{error}</p>}
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function SignOut() {
+  const { npub, keyError } = Launcher.useSelector((s) => s.context);
+  const busy = Launcher.useSelector((s) => !s.matches({ key: "ready" }));
+  const { send } = Launcher.useActorRef();
+  if (!npub) return null;
+  return (
+    <div className="mt-10 max-w-3xl border-t pt-8">
+      <h2 className="mb-3 font-semibold">Your key</h2>
+      <p className="font-mono text-xs break-all text-muted-foreground">{npub}</p>
+      <Dialog>
+        <DialogTrigger render={<Button variant="destructive" className="mt-4" />}>
+          Sign out
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Back up your key first</DialogTitle>
+            <DialogDescription>
+              Signing out deletes it from this Mac. Copy it from Keychain Access
+              (lol.anchorman.keyhall) first.
+            </DialogDescription>
+          </DialogHeader>
+          {keyError && <p className="text-sm text-destructive">{keyError}</p>}
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button
+              variant="destructive"
+              disabled={busy}
+              onClick={() => send({ type: "key.signOut" })}
+            >
+              Delete key and sign out
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

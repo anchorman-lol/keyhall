@@ -160,6 +160,26 @@ async fn import_key(app: AppHandle, nsec: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn sign_out(app: AppHandle) -> Result<(), String> {
+    for window in app.webview_windows().into_values() {
+        if window.label() != "main" {
+            window.destroy().map_err(|e| e.to_string())?;
+        }
+    }
+    keychain_task(app, |l| {
+        match keychain(KEYCHAIN_ACCOUNT)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(format!("Keyhall can't remove the key from the keychain: {e}")),
+        }
+        *l.keys.lock().unwrap() = None;
+        l.approved.lock().unwrap().clear();
+        l.pending.lock().unwrap().clear();
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
 async fn wallet_status(app: AppHandle) -> Result<Option<String>, String> {
     keychain_task(app, |l| {
         Ok(l.stored_wallet()?.as_ref().map(wallet::summary))
@@ -465,6 +485,7 @@ pub fn run() {
             key_status,
             generate_key,
             import_key,
+            sign_out,
             open_game,
             check_game,
             close_game,
