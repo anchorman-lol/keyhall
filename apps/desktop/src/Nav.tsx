@@ -2,6 +2,7 @@ import { pubkeyOf, running } from "@keyhall/core/launcher";
 import type { Game } from "@keyhall/core/listing";
 import type { Friend } from "@keyhall/core/presence";
 import { Button } from "@keyhall/ui/components/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@keyhall/ui/components/popover";
 import { cn } from "@keyhall/ui/lib/utils";
 import {
   AppWindowIcon,
@@ -10,11 +11,14 @@ import {
   KeyholeIcon,
   SquaresFourIcon,
   StopIcon,
+  UserCircleIcon,
   type Icon,
 } from "@phosphor-icons/react";
 import { minutes, Launcher, useNow } from "./launcher.ts";
 import { Avatar } from "./Friends.tsx";
 import { Cover, GameIcon, Live } from "./Library.tsx";
+import { ProfileDialog } from "./ProfileDialog.tsx";
+import { useCallback, useState } from "react";
 
 const fade =
   "opacity-0 transition-opacity duration-150 group-hover/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100";
@@ -109,26 +113,50 @@ function RunningCard({ game, since }: { game: Game; since: number | undefined })
 
 function Identity({ npub, me }: { npub: string; me: Friend }) {
   const short = `${npub.slice(0, 12)}…${npub.slice(-4)}`;
+  const [menu, setMenu] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const close = useCallback(() => setEditing(false), []);
   return (
-    <div title={npub} className="flex h-10 items-center">
-      <span className="grid w-10 shrink-0 place-items-center">
-        <Avatar
-          friend={me}
-          className="size-8"
-          fallback={<KeyholeIcon weight="fill" className="size-[18px] text-primary" />}
-        />
-      </span>
-      <span className={cn("grid min-w-0 flex-1 pl-1.5 leading-tight", fade)}>
-        <span
-          className={cn("truncate", me.name ? "text-[13px] font-medium" : "font-mono text-[11px]")}
-        >
-          {me.name ?? short}
+    <Popover open={menu} onOpenChange={setMenu}>
+      <PopoverTrigger
+        title={npub}
+        className="flex h-10 w-full items-center rounded-lg text-left outline-none hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-ring/60 data-popup-open:bg-white/[0.075]"
+      >
+        <span className="grid w-10 shrink-0 place-items-center">
+          <Avatar
+            friend={me}
+            className="size-8"
+            fallback={<KeyholeIcon weight="fill" className="size-[18px] text-primary" />}
+          />
         </span>
-        {me.name && (
-          <span className="truncate font-mono text-[11px] text-muted-foreground">{short}</span>
-        )}
-      </span>
-    </div>
+        <span className={cn("grid min-w-0 flex-1 pl-1.5 leading-tight", fade)}>
+          <span
+            className={cn(
+              "truncate",
+              me.name ? "text-[13px] font-medium" : "font-mono text-[11px]",
+            )}
+          >
+            {me.name ?? short}
+          </span>
+          {me.name && (
+            <span className="truncate font-mono text-[11px] text-muted-foreground">{short}</span>
+          )}
+        </span>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-56 gap-0 rounded-xl p-1.5">
+        <button
+          onClick={() => {
+            setMenu(false);
+            setEditing(true);
+          }}
+          className="flex h-9 items-center gap-2 rounded-lg px-2 text-left text-[13px] hover:bg-white/[0.05]"
+        >
+          <UserCircleIcon className="size-4 text-muted-foreground" />
+          Edit profile
+        </button>
+      </PopoverContent>
+      <ProfileDialog open={editing} onClose={close} />
+    </Popover>
   );
 }
 

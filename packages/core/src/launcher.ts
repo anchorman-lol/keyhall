@@ -16,6 +16,7 @@ import type { Game } from "./listing";
 import {
   DEFAULT_PRESENCE,
   modeFor,
+  parseProfile,
   publishPresence,
   STATUS_TTL,
   watchFriends,
@@ -28,6 +29,7 @@ import {
   type PublishInput,
   type Status,
 } from "./presence";
+import { profileTemplate, type ProfileFields } from "./profile";
 import {
   addCurator,
   defaultSources,
@@ -94,7 +96,7 @@ export interface LauncherDeps extends PresenceDeps {
   signLabel(template: ReturnType<typeof labelTemplate>): Promise<Event>;
   publish(event: Event): Promise<void>;
   fetchFriends(pubkey: string): Promise<Friend[]>;
-  fetchProfile(pubkey: string): Promise<Friend>;
+  fetchProfileEvent(pubkey: string): Promise<Event | undefined>;
   saveFriendsOpen(open: boolean): void;
   savePresence(presence: PresenceSettings, circle: Circle | undefined): void;
   sessions(): Promise<Session[]>;
@@ -150,6 +152,8 @@ export interface LauncherContext {
   friends?: Friend[];
   friendsOpen: boolean;
   profile?: Friend;
+  profileEvent?: Event;
+  profileError: string;
   statuses: Record<string, Status>;
   presence: PresenceSettings;
   circle?: Circle;
@@ -196,7 +200,10 @@ type Events =
   | { type: "zap.finished" }
   | { type: "labels.loaded"; labels: Label[] }
   | { type: "label.publish"; game: Game; methods: string[]; depth: Depth | undefined }
-  | { type: "warning.dismiss" };
+  | { type: "warning.dismiss" }
+  | { type: "profile.edit" }
+  | { type: "profile.save"; fields: ProfileFields }
+  | { type: "profile.cancel" };
 
 const record = (
   context: LauncherContext,
@@ -369,8 +376,16 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           .then((label) => sendBack({ type: "opened", coordinate: input.coordinate, label }));
       }),
       fetchFriends: fromPromise<Friend[], string>(({ input }) => deps.fetchFriends(input)),
-      fetchProfile: fromPromise<Friend, string>(({ input }) =>
-        deps.fetchProfile(input).catch(() => ({ pubkey: input })),
+      fetchProfileEvent: fromPromise<Event | undefined, string>(({ input }) =>
+        deps.fetchProfileEvent(input),
+      ),
+      saveProfile: fromPromise<Event, { previous: Event | undefined; fields: ProfileFields }>(
+        async ({ input }) => {
+          const now = Math.floor(Date.now() / 1000);
+          const event = await deps.signEvent(profileTemplate(input.previous, input.fields, now));
+          await deps.publish(event);
+          return event;
+        },
       ),
       watchFriends: fromCallback<Events, { me: string; follows: string[] }>(({ input, sendBack }) =>
         watchFriends(deps, input.me, input.follows, (pubkey, at, status) =>
@@ -414,6 +429,10 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       ),
     },
     actions: {
+      setProfile: assign(({ context }, event: Event | undefined) => ({
+        profileEvent: event,
+        profile: parseProfile(pubkeyOf(context)!, event),
+      })),
       saveObserved: ({ context }) => deps.saveObserved(context.observed),
       saveSources: ({ context }) => deps.saveSources(context.sources),
       saveRelays: ({ context }) => deps.saveRelays(context.relays),
@@ -472,6 +491,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       labelled: [],
       labelError: "",
       keyWarnings: [],
+      profileError: "",
     },
     invoke: { src: "listen" },
     entry: ["probeRelays", "fetchSources"],
@@ -796,15 +816,61 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           waiting: { always: { guard: ({ context }) => !!context.npub, target: "loading" } },
           loading: {
             invoke: {
-              src: "fetchProfile",
+              src: "fetchProfileEvent",
               input: ({ context }) => pubkeyOf(context)!,
               onDone: {
                 target: "ready",
-                actions: assign({ profile: ({ event }) => event.output }),
+                actions: { type: "setProfile", params: ({ event }) => event.output },
+              },
+              onError: {
+                target: "ready",
+                actions: assign({ profile: ({ context }) => ({ pubkey: pubkeyOf(context)! }) }),
               },
             },
           },
-          ready: {},
+          ready: {
+            on: { "profile.edit": { target: "fetching", actions: assign({ profileError: "" }) } },
+          },
+          fetching: {
+            on: { "profile.cancel": "ready" },
+            invoke: {
+              src: "fetchProfileEvent",
+              input: ({ context }) => pubkeyOf(context)!,
+              onDone: {
+                target: "editing",
+                actions: { type: "setProfile", params: ({ event }) => event.output },
+              },
+              onError: {
+                target: "ready",
+                actions: assign({
+                  profileError: ({ event }) => `Couldn't load your profile: ${String(event.error)}`,
+                }),
+              },
+            },
+          },
+          editing: {
+            on: {
+              "profile.save": { target: "saving", actions: assign({ profileError: "" }) },
+              "profile.cancel": { target: "ready", actions: assign({ profileError: "" }) },
+            },
+          },
+          saving: {
+            invoke: {
+              src: "saveProfile",
+              input: ({ context, event }) => ({
+                previous: context.profileEvent,
+                fields: (event as Extract<Events, { type: "profile.save" }>).fields,
+              }),
+              onDone: {
+                target: "ready",
+                actions: { type: "setProfile", params: ({ event }) => event.output },
+              },
+              onError: {
+                target: "editing",
+                actions: assign({ profileError: ({ event }) => String(event.error) }),
+              },
+            },
+          },
         },
       },
       presence: {

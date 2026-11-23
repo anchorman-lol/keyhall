@@ -317,6 +317,7 @@ async fn nostr_sign_event(
     event: EventRequest,
 ) -> Result<Event, String> {
     let game = state.game(&window)?;
+    signer::game_may_sign(event.kind)?;
     let keys = keychain_task(app.clone(), Launcher::keys).await?;
     let approval = (window.label().to_string(), event.kind);
     if !state.approved.lock().unwrap().contains(&approval) {

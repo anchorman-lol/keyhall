@@ -10,7 +10,7 @@ const USES: Record<Use, [string, string]> = {
   listings: ["Game listings", "Unvetted listings, games in lists, repo updates"],
   lists: ["Picks & curator lists", "Lists and curators' sign-in labels"],
   social: ["Friends & presence", "Follows, profiles and friends' status"],
-  presence: ["Presence", "Your playing status and circle keys"],
+  presence: ["Presence & profile", "Your profile, playing status and circle keys"],
   labels: ["Curator labels", "Sign-in labels you publish"],
   zaps: ["Zap receipts", "Where wallets post receipts for your zaps"],
 };

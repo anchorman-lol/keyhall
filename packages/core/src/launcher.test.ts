@@ -101,7 +101,7 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     ...signerFor(secret),
     ...relay(),
     fetchFriends: async () => [],
-    fetchProfile: async (pubkey) => ({ pubkey }),
+    fetchProfileEvent: async () => undefined,
     saveFriendsOpen: vi.fn(),
     savePresence: vi.fn(),
     sessions: async () => [],
@@ -483,22 +483,99 @@ describe("friends", () => {
 });
 
 describe("identity", () => {
+  const kind0 = (content: object, created_at = 1) =>
+    finalizeEvent(
+      { kind: 0, content: JSON.stringify(content), tags: [["i", "github:leon", "p"]], created_at },
+      secret,
+    );
+
   it("loads the player's own profile once the key is ready", async () => {
-    const me = { pubkey: getPublicKey(secret), name: "Leon", picture: "https://x.test/l.png" };
-    const fetchProfile = vi.fn(async () => me);
-    const { actor } = start({ keyStatus: async () => npub, fetchProfile });
+    const fetchProfileEvent = vi.fn(async () =>
+      kind0({ name: "Leon", picture: "https://x.test/l.png" }),
+    );
+    const { actor } = start({ keyStatus: async () => npub, fetchProfileEvent });
     await waitFor(actor, (s) => s.context.profile !== undefined);
-    expect(fetchProfile).toHaveBeenCalledWith(getPublicKey(secret));
-    expect(actor.getSnapshot().context.profile).toEqual(me);
+    expect(fetchProfileEvent).toHaveBeenCalledWith(getPublicKey(secret));
+    expect(actor.getSnapshot().context.profile).toEqual({
+      pubkey: getPublicKey(secret),
+      name: "Leon",
+      picture: "https://x.test/l.png",
+    });
   });
 
   it("keeps the bare pubkey when the profile can't be fetched", async () => {
     const { actor } = start({
       keyStatus: async () => npub,
-      fetchProfile: () => Promise.reject(new Error("offline")),
+      fetchProfileEvent: () => Promise.reject(new Error("offline")),
     });
     await waitFor(actor, (s) => s.context.profile !== undefined);
     expect(actor.getSnapshot().context.profile).toEqual({ pubkey: getPublicKey(secret) });
+  });
+
+  it("edits the latest profile on the relays, keeping fields it doesn't show", async () => {
+    const latest = kind0({ name: "Leon", nip05: "leon@x.test", lud16: "l@x.test" }, 5);
+    const fetchProfileEvent = vi.fn(async () => kind0({ name: "Old" }));
+    const mock = relay();
+    const { actor } = start({ keyStatus: async () => npub, fetchProfileEvent, ...mock });
+    await waitFor(actor, (s) => s.matches({ profile: "ready" }));
+    fetchProfileEvent.mockResolvedValue(latest);
+    actor.send({ type: "profile.edit" });
+    await waitFor(actor, (s) => s.matches({ profile: "editing" }));
+    expect(actor.getSnapshot().context.profileEvent).toEqual(latest);
+    actor.send({
+      type: "profile.save",
+      fields: { name: "Leon W", picture: "", about: "Plays games", lud16: "l@x.test" },
+    });
+    await waitFor(actor, (s) => s.matches({ profile: "ready" }));
+    const [event] = mock.published;
+    expect(event).toMatchObject({ kind: 0, pubkey: getPublicKey(secret), tags: latest.tags });
+    expect(JSON.parse(event!.content)).toEqual({
+      name: "Leon W",
+      nip05: "leon@x.test",
+      lud16: "l@x.test",
+      about: "Plays games",
+    });
+    expect(actor.getSnapshot().context.profile?.name).toBe("Leon W");
+    expect(actor.getSnapshot().context.profileEvent).toEqual(event);
+  });
+
+  it("won't edit when the latest profile can't be loaded", async () => {
+    const fetchProfileEvent = vi.fn(async () => kind0({ name: "Leon" }));
+    const { actor } = start({ keyStatus: async () => npub, fetchProfileEvent });
+    await waitFor(actor, (s) => s.matches({ profile: "ready" }));
+    fetchProfileEvent.mockRejectedValue(new Error("Couldn't reach your relays"));
+    actor.send({ type: "profile.edit" });
+    await waitFor(actor, (s) => s.context.profileError !== "");
+    expect(actor.getSnapshot().matches({ profile: "ready" })).toBe(true);
+    expect(actor.getSnapshot().context.profileError).toContain("Couldn't reach your relays");
+  });
+
+  it("stays in the editor with the error when publishing fails, and cancels", async () => {
+    const mock = relay();
+    mock.publish.mockRejectedValue(new Error("blocked"));
+    const { actor } = start({ keyStatus: async () => npub, ...mock });
+    await waitFor(actor, (s) => s.matches({ profile: "ready" }));
+    actor.send({ type: "profile.edit" });
+    await waitFor(actor, (s) => s.matches({ profile: "editing" }));
+    actor.send({
+      type: "profile.save",
+      fields: { name: "Leon", picture: "", about: "", lud16: "" },
+    });
+    await waitFor(actor, (s) => s.context.profileError !== "");
+    expect(actor.getSnapshot().matches({ profile: "editing" })).toBe(true);
+    actor.send({ type: "profile.cancel" });
+    expect(actor.getSnapshot().matches({ profile: "ready" })).toBe(true);
+    expect(actor.getSnapshot().context.profileError).toBe("");
+  });
+
+  it("stops loading the profile to edit when cancelled", async () => {
+    const fetchProfileEvent = vi.fn(async () => undefined);
+    const { actor } = start({ keyStatus: async () => npub, fetchProfileEvent });
+    await waitFor(actor, (s) => s.matches({ profile: "ready" }));
+    fetchProfileEvent.mockReturnValue(new Promise(() => {}));
+    actor.send({ type: "profile.edit" });
+    actor.send({ type: "profile.cancel" });
+    expect(actor.getSnapshot().matches({ profile: "ready" })).toBe(true);
   });
 
   it("shows the friends column by default, toggles it and saves the choice", () => {

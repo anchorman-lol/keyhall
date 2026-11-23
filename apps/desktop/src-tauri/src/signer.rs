@@ -10,8 +10,16 @@ pub struct EventRequest {
     pub created_at: u64,
 }
 
-/// Kinds the launcher window signs for presence: NIP-59 seals and NIP-38 statuses.
-const LAUNCHER_KINDS: [u16; 2] = [13, 30315];
+/// Kinds the launcher window signs: the profile (kind 0), NIP-59 seals and NIP-38 statuses.
+const LAUNCHER_KINDS: [u16; 3] = [0, 13, 30315];
+
+/// Games never sign the profile, even with the player's approval; only the launcher edits it.
+pub fn game_may_sign(kind: u16) -> Result<(), String> {
+    match kind {
+        0 => Err("Games can't change your profile".into()),
+        _ => Ok(()),
+    }
+}
 
 pub fn sign_for_launcher(keys: &Keys, req: &EventRequest) -> Result<Event, String> {
     if !LAUNCHER_KINDS.contains(&req.kind) {
@@ -76,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn the_launcher_signs_only_presence_kinds() {
+    fn the_launcher_signs_only_profile_and_presence_kinds() {
         let keys = Keys::generate();
         let req = |kind: u16| {
             request(&format!(
@@ -86,7 +94,15 @@ mod tests {
         };
         assert!(sign_for_launcher(&keys, &req(30315)).is_ok());
         assert!(sign_for_launcher(&keys, &req(13)).is_ok());
+        assert!(sign_for_launcher(&keys, &req(0)).is_ok());
         assert!(sign_for_launcher(&keys, &req(1)).is_err());
+    }
+
+    #[test]
+    fn games_never_sign_the_profile() {
+        assert!(game_may_sign(0).is_err());
+        assert!(game_may_sign(1).is_ok());
+        assert!(game_may_sign(30315).is_ok());
     }
 
     #[test]

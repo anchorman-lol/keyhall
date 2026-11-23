@@ -66,6 +66,7 @@ describe("relay settings", () => {
     expect(writeUseOf(1985)).toBe("labels");
     expect(writeUseOf(30315)).toBe("presence");
     expect(writeUseOf(1059)).toBe("presence");
+    expect(writeUseOf(0)).toBe("presence");
   });
 
   it("loads saved relays, dropping bad entries and duplicates, and falls back to defaults", () => {
