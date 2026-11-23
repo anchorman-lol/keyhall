@@ -30,14 +30,14 @@ export function Notice({
       <Window
         kind="notice"
         title="Keep your key in Keyhall"
-        subtitle={`${game} asks for your private key`}
+        subtitle={`${game} has a field for a private key`}
         cascade={cascade}
         onClose={done}
       >
         <p className="text-muted-foreground">
-          Don't paste your nsec here: anything typed into a game can leave with it. Keyhall signs
-          for {game} without sharing your key, so pick its extension or signer login, or play as a
-          guest.
+          You don't need it in Keyhall: it already signs for {game} without sharing your key, so
+          pick its extension or signer login, or play as a guest. Don't paste your nsec there,
+          since anything typed into a game can leave with it.
         </p>
         <Button onClick={done}>Got it</Button>
       </Window>

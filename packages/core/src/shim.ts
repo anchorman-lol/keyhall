@@ -47,28 +47,22 @@ function install(hotkey: string, keys: typeof combo) {
   };
 
   const KEY = /\bnsec|priv(ate)?[\s_-]*key|secret[\s_-]*key|\b[0-9a-f]{64}\b/i;
-  const keyShaped = (field: HTMLInputElement) =>
-    [
-      field.getAttribute("placeholder"),
-      field.getAttribute("name"),
-      field.getAttribute("id"),
-      field.getAttribute("aria-label"),
-      ...Array.from(field.labels ?? [], (l) => l.textContent),
-    ].some((text) => text && KEY.test(text));
-  const scan = () => {
-    if (![...document.querySelectorAll<HTMLInputElement>("input, textarea")].some(keyShaped))
+  const onFocus = ({ target: field }: FocusEvent) => {
+    if (
+      !(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) ||
+      ![
+        field.getAttribute("placeholder"),
+        field.getAttribute("name"),
+        field.getAttribute("id"),
+        field.getAttribute("aria-label"),
+        ...Array.from(field.labels ?? [], (l) => l.textContent),
+      ].some((text) => text && KEY.test(text))
+    )
       return;
-    watch.disconnect();
+    document.removeEventListener("focusin", onFocus, true);
     invoke("nostr_key_field", {}).catch(() => {});
   };
-  const watch = new MutationObserver(scan);
-  watch.observe(document, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["placeholder", "name", "id", "aria-label"],
-  });
-  scan();
+  document.addEventListener("focusin", onFocus, true);
 }
 
 export const shimScript = (hotkey: string) =>

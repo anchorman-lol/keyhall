@@ -88,15 +88,33 @@ describe("shim", () => {
   const keyFields = () => invoke.mock.calls.filter(([cmd]) => cmd === "nostr_key_field");
   const settle = () => new Promise((r) => setTimeout(r));
 
+  const focus = (selector: string) => document.querySelector<HTMLElement>(selector)!.focus();
+
   it.each([
     ['<input placeholder="nsec1...">'],
     ['<input name="privateKey">'],
     ['<input aria-label="Secret key">'],
     ['<label for="k">Your private key</label><input id="k" type="password">'],
     [`<textarea placeholder="${"0f".repeat(32)}"></textarea>`],
-  ])("reports a key-shaped field once, without its contents: %s", async (html) => {
+  ])("reports a key-shaped field once it gets focus, without its contents: %s", async (html) => {
     document.body.innerHTML = `<div>${html}</div><input placeholder="nsec">`;
     await settle();
+    expect(keyFields()).toEqual([]);
+    focus("div :is(input, textarea)");
+    focus("body > input");
+    expect(keyFields()).toEqual([["nostr_key_field", {}]]);
+  });
+
+  it("stays quiet about an optional key field until it is revealed and focused", async () => {
+    document.body.innerHTML = "<button>Use your own key</button>";
+    const button = document.querySelector("button")!;
+    button.addEventListener("click", () =>
+      document.body.insertAdjacentHTML("beforeend", '<input placeholder="nsec1...">'),
+    );
+    button.click();
+    await settle();
+    expect(keyFields()).toEqual([]);
+    focus("input");
     expect(keyFields()).toEqual([["nostr_key_field", {}]]);
   });
 
@@ -109,7 +127,7 @@ describe("shim", () => {
       },
     });
     document.body.replaceChildren(input);
-    await settle();
+    input.focus();
     expect(keyFields()).toEqual([]);
   });
 });
