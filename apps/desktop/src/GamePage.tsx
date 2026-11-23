@@ -26,6 +26,7 @@ import {
 } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { DEPTH, DepthBadge, SIGN_IN, SignInBadge, verifiers } from "./badges.tsx";
+import { KeyDialog } from "./KeyDialog.tsx";
 import { LabelDialog } from "./LabelDialog.tsx";
 import { formatDate, Launcher, minutes, useNow } from "./launcher.ts";
 import { FriendsPlaying } from "./Friends.tsx";
@@ -168,6 +169,8 @@ export function GamePage({ game }: { game: Game }) {
                     </span>
                   )}
                 </>
+              ) : !context.npub ? (
+                <KeyDialog />
               ) : (
                 <Button size="lg" className="px-5" onClick={() => send({ type: "play", game })}>
                   <PlayIcon weight="fill" data-icon="inline-start" /> Play
