@@ -72,7 +72,7 @@ function Checks<T extends string>({
 const seenSignIn = ({ value }: Claim<string>) =>
   value === "signer"
     ? "The game window saw it sign in through Keyhall."
-    : "The game window saw a private-key field get focus.";
+    : "You focused a private-key field.";
 
 function Block({ title, end, children }: { title: string; end?: ReactNode; children: ReactNode }) {
   return (
