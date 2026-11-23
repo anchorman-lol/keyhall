@@ -5,6 +5,7 @@ import { listsFor, type CuratorList, type ListRef } from "./curation";
 import { AUTH_NS, DEPTH_NS, parseLabels, type Label } from "./labels";
 import { lastUpdated, parseListings, type Game } from "./listing";
 import { parseProfile, type Friend } from "./presence";
+import { profileFields } from "./profile";
 import { DEFAULT_RELAYS, relaysFor, writeUseOf, type ReadUse, type Relay } from "./relaySettings";
 import { payOverNwc, zapInvoice, type Payment, type WalletRequest } from "./zap";
 
@@ -73,14 +74,20 @@ export async function fetchFriends(pubkey: string): Promise<Friend[]> {
   return follows.length ? fetchProfiles(follows) : [];
 }
 
-async function fetchProfiles(pubkeys: string[]): Promise<Friend[]> {
+async function latestProfiles(pubkeys: string[]) {
   const profiles = new Map<string, Event>();
   for (const e of await query("social", { kinds: [0], authors: pubkeys }, 4000))
     if ((profiles.get(e.pubkey)?.created_at ?? 0) < e.created_at) profiles.set(e.pubkey, e);
+  return profiles;
+}
+
+async function fetchProfiles(pubkeys: string[]): Promise<Friend[]> {
+  const profiles = await latestProfiles(pubkeys);
   return pubkeys.map((pubkey) => parseProfile(pubkey, profiles.get(pubkey)));
 }
 
-export const fetchProfile = async (pubkey: string) => (await fetchProfiles([pubkey]))[0]!;
+export const fetchProfileEvent = async (pubkey: string) =>
+  (await latestProfiles([pubkey])).get(pubkey);
 
 export const subscribe = (filter: Filter, onevent: (event: Event) => void) => {
   const sub = pool.subscribeMany(relaysFor(settings, "social"), filter, { onevent });
@@ -134,20 +141,6 @@ export async function fetchLastUpdated(game: Game): Promise<number> {
   return lastUpdated(...times);
 }
 
-async function fetchLud16(pubkey: string): Promise<string | undefined> {
-  const profile = await pool.get(
-    relaysFor(settings, "social"),
-    { kinds: [0], authors: [pubkey] },
-    { maxWait: 4000 },
-  );
-  try {
-    const { lud16 } = JSON.parse(profile?.content ?? "{}") as Record<string, unknown>;
-    return typeof lud16 === "string" ? lud16 : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function zap(
   payment: Payment,
   comment: string,
@@ -156,7 +149,7 @@ export async function zap(
     result(reply: Event): Promise<string>;
   },
 ) {
-  const lud16 = payment.lud16 ?? (await fetchLud16(payment.pubkey));
+  const lud16 = payment.lud16 ?? profileFields(await fetchProfileEvent(payment.pubkey)).lud16;
   if (!lud16) throw new Error("The developer's profile has no lightning address");
   const invoice = await zapInvoice(
     fetch,
