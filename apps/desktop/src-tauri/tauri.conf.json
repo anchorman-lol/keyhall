@@ -27,6 +27,12 @@
       "csp": "default-src 'self'; img-src 'self' https: data:; connect-src 'self' ipc: http://ipc.localhost wss: https:; style-src 'self' 'unsafe-inline'"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyQjRFNkVDMzQ1RTlBQzcKUldUSG1sNDA3T2EwMGgxbmhldjlySEhGa0JhQThHVzhCR0hFVmNvMC9BZXNRN1dlM0Q1TllLWjQK",
+      "endpoints": ["https://github.com/anchorman-lol/keyhall/releases/latest/download/latest.json"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["app"],

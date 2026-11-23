@@ -25,6 +25,7 @@
     "allow-wallet-pay-request",
     "allow-wallet-pay-result",
     "allow-play-sessions",
-    "allow-sign-label"
+    "allow-sign-label",
+    "allow-restart-to-update"
   ]
 }

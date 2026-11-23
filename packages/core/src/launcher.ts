@@ -72,7 +72,8 @@ export type LauncherEvent =
   | { type: "observed"; coordinate: string; kinds: number[] }
   | { type: "closed"; coordinate: string }
   | { type: "sign-request"; request: SignRequest }
-  | { type: "key-field"; coordinate: string };
+  | { type: "key-field"; coordinate: string }
+  | { type: "update-ready"; version: string };
 
 type KeyCommand = "generate_key" | "import_key";
 
@@ -104,6 +105,7 @@ export interface LauncherDeps extends PresenceDeps {
   connectWallet(uri: string): Promise<string>;
   pay(payment: Payment, comment: string): Promise<void>;
   saveBudget(budget: BudgetSettings): void;
+  restart(): void;
 }
 
 export interface BudgetSettings {
@@ -163,6 +165,7 @@ export interface LauncherContext {
   wallet: string | null;
   walletError: string;
   payErrors: Record<string, string>;
+  update?: string;
 }
 
 export type View = "budget" | "settings" | "relays";
@@ -203,7 +206,8 @@ type Events =
   | { type: "warning.dismiss" }
   | { type: "profile.edit" }
   | { type: "profile.save"; fields: ProfileFields }
-  | { type: "profile.cancel" };
+  | { type: "profile.cancel" }
+  | { type: "update.restart" };
 
 const record = (
   context: LauncherContext,
@@ -611,6 +615,11 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       },
       "warning.dismiss": {
         actions: assign({ keyWarnings: ({ context }) => context.keyWarnings.slice(1) }),
+      },
+      "update-ready": { actions: assign({ update: ({ event }) => event.version }) },
+      "update.restart": {
+        guard: ({ context }) => !Object.keys(context.windows).length,
+        actions: () => deps.restart(),
       },
       updated: {
         actions: assign({

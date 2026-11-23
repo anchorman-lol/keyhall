@@ -81,6 +81,9 @@ const machine = launcherMachine(
         listen<string>("key-field", ({ payload }) =>
           send({ type: "key-field", coordinate: payload }),
         ),
+        listen<string>("update-ready", ({ payload }) =>
+          send({ type: "update-ready", version: payload }),
+        ),
       ];
       return () => subscriptions.forEach((s) => s.then((unlisten) => unlisten()));
     },
@@ -109,6 +112,7 @@ const machine = launcherMachine(
         result: (reply) => invoke("wallet_pay_result", { reply }),
       }),
     saveBudget: (budget) => localStorage.setItem("budget", JSON.stringify(budget)),
+    restart: () => void invoke("restart_to_update"),
   },
   {
     observed: JSON.parse(localStorage.getItem("observed") ?? "{}"),

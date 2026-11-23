@@ -17,6 +17,7 @@ use tauri::{
     AppHandle, Emitter, Manager, State, UserAttentionType, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::oneshot;
 use url::Url;
 
@@ -26,6 +27,7 @@ use signer::EventRequest;
 const KEYCHAIN_SERVICE: &str = "lol.anchorman.keyhall";
 const KEYCHAIN_ACCOUNT: &str = "nsec";
 const WALLET_ACCOUNT: &str = "nwc";
+const UPDATE_INTERVAL: Duration = Duration::from_secs(4 * 60 * 60);
 const GAME_PERMISSIONS: [&str; 4] = [
     "allow-nostr-get-public-key",
     "allow-nostr-sign-event",
@@ -385,6 +387,37 @@ async fn sign_label(app: AppHandle, event: EventRequest) -> Result<Event, String
     signer::label(&keychain_task(app, Launcher::keys).await?, &event)
 }
 
+#[tauri::command]
+fn restart_to_update(app: AppHandle, state: State<Launcher>) -> Result<(), String> {
+    if !state.games.lock().unwrap().is_empty() {
+        return Err("Close your games to restart Keyhall".into());
+    }
+    app.restart()
+}
+
+async fn install_update(app: &AppHandle) -> tauri_plugin_updater::Result<Option<String>> {
+    let Some(update) = app.updater()?.check().await? else {
+        return Ok(None);
+    };
+    update.download_and_install(|_, _| {}, || {}).await?;
+    Ok(Some(update.version))
+}
+
+/// Installs the next release in the background, so it runs from the next start.
+async fn keep_updated(app: AppHandle) {
+    loop {
+        match install_update(&app).await {
+            Ok(Some(version)) => {
+                let _ = app.emit_to("main", "update-ready", version);
+                return;
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("Keyhall couldn't update: {e}"),
+        }
+        tokio::time::sleep(UPDATE_INTERVAL).await;
+    }
+}
+
 /// The launcher draws its window controls on the right of its title bar, like Steam.
 #[cfg(target_os = "macos")]
 fn hide_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()> {
@@ -405,6 +438,7 @@ fn hide_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Launcher::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -422,6 +456,9 @@ pub fn run() {
                         .tick(meter::now());
                 }
             });
+            if option_env!("KEYHALL_UPDATES").is_some() {
+                tauri::async_runtime::spawn(keep_updated(app.handle().clone()));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -444,7 +481,8 @@ pub fn run() {
             nostr_sign_event,
             nostr_observe,
             nostr_key_field,
-            sign_label
+            sign_label,
+            restart_to_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running Keyhall");

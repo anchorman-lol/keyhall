@@ -27,21 +27,39 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @keyhall/desktop tauri build --bundles app,dmg
-      - name: Pick the tag
+      - name: Pick the tag and app version
         id: tag
         run: |
           tag="v$(date -u +%Y.%m.%d)"
           n=$(git tag -l "$tag" "$tag.*" | wc -l | tr -d ' ')
           if [ "$n" -gt 0 ]; then tag="$tag.$((n + 1))"; fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          mv apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg "Keyhall_${tag}_aarch64.dmg"
+          echo "version=$(date -u +%Y.%-m%d).$n" >> "$GITHUB_OUTPUT"
+      - name: Build a signed update
+        env:
+          KEYHALL_UPDATES: "1"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          pnpm --filter @keyhall/desktop tauri build --bundles app,dmg \
+            --config "{\"version\":\"$VERSION\",\"bundle\":{\"createUpdaterArtifacts\":true}}"
+          bundle=apps/desktop/src-tauri/target/release/bundle
+          app="Keyhall_${TAG}_aarch64.app.tar.gz"
+          mv "$bundle"/dmg/*.dmg "Keyhall_${TAG}_aarch64.dmg"
+          mv "$bundle/macos/Keyhall.app.tar.gz" "$app"
+          mv "$bundle/macos/Keyhall.app.tar.gz.sig" "$app.sig"
+          jq -n --arg version "$VERSION" --arg signature "$(cat "$app.sig")" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$app" \
+            '{$version, $pub_date, platforms: {"darwin-aarch64": {$signature, $url}}}' > latest.json
       - name: Publish the release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          gh release create "$TAG" "Keyhall_${TAG}_aarch64.dmg" \
+          gh release create "$TAG" "Keyhall_${TAG}_aarch64.dmg" Keyhall_"$TAG"_aarch64.app.tar.gz* latest.json \
             --target "$GITHUB_SHA" --title "Keyhall $TAG" --generate-notes \
-            --notes "Apple Silicon build. It isn't signed with a Developer ID or notarized yet, so macOS will refuse to open it at first: right-click Keyhall.app and choose Open, or run \`xattr -dr com.apple.quarantine /Applications/Keyhall.app\`."
+            --notes "Apple Silicon build. It isn't signed with a Developer ID or notarized yet, so macOS will refuse to open it at first: right-click Keyhall.app and choose Open, or run \`xattr -dr com.apple.quarantine /Applications/Keyhall.app\`. Once installed, Keyhall updates itself from the latest release."
