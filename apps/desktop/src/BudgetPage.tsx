@@ -1,4 +1,11 @@
-import { monthKey, monthName, playTime, previousMonth, type Share } from "@keyhall/core/budget";
+import {
+  monthKey,
+  monthName,
+  payouts,
+  playTime,
+  previousMonth,
+  type Share,
+} from "@keyhall/core/budget";
 import { findGame, monthSplit } from "@keyhall/core/launcher";
 import { Badge } from "@keyhall/ui/components/badge";
 import { Button } from "@keyhall/ui/components/button";
@@ -14,13 +21,14 @@ import {
   DialogTrigger,
 } from "@keyhall/ui/components/dialog";
 import { Input } from "@keyhall/ui/components/input";
-import { LightningIcon } from "@phosphor-icons/react";
+import { ChartPieSliceIcon, LightningIcon, TimerIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Launcher } from "./launcher.ts";
 import { Cover } from "./Library.tsx";
 
 const SHADES = ["bg-primary", "bg-primary/75", "bg-primary/55", "bg-primary/40", "bg-primary/25"];
 const sats = (n: number) => n.toLocaleString("en");
+const games = (n: number) => `${n} ${n === 1 ? "game" : "games"}`;
 const duration = (s: number) =>
   `${Math.floor(s / 3600)} h ${String(Math.floor(s / 60) % 60).padStart(2, "0")} m`;
 
@@ -37,66 +45,75 @@ function Settings() {
   const [amount, setAmount] = useState(String(budget.sats || ""));
   const [uri, setUri] = useState("");
   return (
-    <div className="grid max-w-xl gap-3">
-      <label className="text-sm font-medium" htmlFor="budget">
-        Budget
-      </label>
-      <div className="flex items-center gap-2">
-        <Input
-          id="budget"
-          type="number"
-          min={0}
-          className="w-36"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-        <span className="text-sm whitespace-nowrap text-muted-foreground">sats / month</span>
-        <Button
-          variant="secondary"
-          disabled={Number(amount) === budget.sats || !(Number(amount) >= 0)}
-          onClick={() => send({ type: "budget.set", sats: Math.floor(Number(amount)) })}
-        >
-          Save
-        </Button>
-      </div>
-      <label className="mt-2 text-sm font-medium" htmlFor="nwc">
-        Wallet
-      </label>
-      {wallet && (
-        <span className="flex items-center gap-2 text-sm">
-          <Badge variant="outline">
-            <LightningIcon weight="fill" data-icon="inline-start" />
-            {wallet} via NWC
-          </Badge>
-          <span className="text-muted-foreground">Paste a new connection to replace it.</span>
-        </span>
-      )}
-      <div className="flex gap-2">
-        <Input
-          id="nwc"
-          type="password"
-          autoComplete="off"
-          placeholder="nostr+walletconnect://…"
-          value={uri}
-          onChange={(e) => setUri(e.target.value)}
-        />
-        <Button
-          variant="secondary"
-          disabled={!uri || connecting}
-          onClick={() => {
-            send({ type: "wallet.connect", uri });
-            setUri("");
-          }}
-        >
-          Connect
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Kept in the macOS keychain, never shown to a game. Give the connection a monthly budget in
-        your wallet too, so the wallet enforces the cap.
-      </p>
-      {walletError && <p className="text-sm text-destructive">{walletError}</p>}
-    </div>
+    <Card size="sm">
+      <CardContent className="grid gap-x-8 gap-y-3 md:grid-cols-2">
+        <div className="grid content-start gap-3">
+          <label className="text-sm font-medium" htmlFor="budget">
+            Budget
+          </label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="budget"
+              type="number"
+              min={0}
+              className="w-36"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <span className="text-sm whitespace-nowrap text-muted-foreground">sats / month</span>
+            <Button
+              variant="secondary"
+              disabled={Number(amount) === budget.sats || !(Number(amount) >= 0)}
+              onClick={() => send({ type: "budget.set", sats: Math.floor(Number(amount)) })}
+            >
+              Save
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            1% stays back as a reserve for routing fees.
+          </p>
+        </div>
+        <div className="grid content-start gap-3">
+          <label className="text-sm font-medium" htmlFor="nwc">
+            Wallet
+          </label>
+          {wallet && (
+            <span className="flex items-center gap-2 text-sm">
+              <Badge variant="outline">
+                <LightningIcon weight="fill" data-icon="inline-start" />
+                {wallet} via NWC
+              </Badge>
+              <span className="text-muted-foreground">Paste a new connection to replace it.</span>
+            </span>
+          )}
+          <div className="flex gap-2">
+            <Input
+              id="nwc"
+              type="password"
+              autoComplete="off"
+              placeholder="nostr+walletconnect://…"
+              value={uri}
+              onChange={(e) => setUri(e.target.value)}
+            />
+            <Button
+              variant="secondary"
+              disabled={!uri || connecting}
+              onClick={() => {
+                send({ type: "wallet.connect", uri });
+                setUri("");
+              }}
+            >
+              Connect
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Kept in the macOS keychain, never shown to a game. Give the connection a monthly budget
+            in your wallet too, so the wallet enforces the cap.
+          </p>
+          {walletError && <p className="text-sm text-destructive">{walletError}</p>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -191,7 +208,7 @@ function Split({ month, running }: { month: string; running?: boolean }) {
             })}
             <div className="flex items-center justify-between gap-4 border-t pt-3 text-sm text-muted-foreground">
               <span>
-                Total {sats(total)} sats to {paidShares.length} games + {sats(reserve)} sats fee
+                Total {sats(total)} sats to {games(paidShares.length)} + {sats(reserve)} sats fee
                 reserve
               </span>
               {!running && due > 0 && (
@@ -233,22 +250,60 @@ function Split({ month, running }: { month: string; running?: boolean }) {
   );
 }
 
+const STEPS = [
+  {
+    icon: TimerIcon,
+    title: "Keyhall meters play time",
+    text: "Every minute a game window is open counts, idle waiting included. It's measured on this device and never published.",
+  },
+  {
+    icon: ChartPieSliceIcon,
+    title: "Your budget is split by it",
+    text: "At the end of the month each game gets its share of the time you played. Games under 15 minutes aren't counted.",
+  },
+  {
+    icon: LightningIcon,
+    title: "Each game gets an anonymous zap",
+    text: "Paid from your wallet over Nostr Wallet Connect once you confirm. Your key and wallet never leave Keyhall.",
+  },
+];
+
 export function BudgetPage() {
-  const sessions = Launcher.useSelector((s) => s.context.sessions);
+  const { sessions, budget } = Launcher.useSelector((s) => s.context);
   const month = monthKey(new Date());
   const last = previousMonth(month);
+  const older = payouts(budget.paid).filter((p) => p.month !== last && p.month !== month);
+  const played = Object.keys(playTime(sessions, last)).length > 0;
   return (
     <>
-      <h1 className="mb-2 text-2xl font-semibold">Monthly budget</h1>
-      <p className="mb-6 max-w-prose text-muted-foreground">
-        Split by play time at the end of each month. Every minute a game window is open counts, idle
-        waiting included. Play time is measured on this device and never published. Nothing is paid
-        until you confirm.
-      </p>
+      <h1 className="mb-4 text-2xl font-semibold">Monthly budget</h1>
+      <ol className="mb-6 grid gap-4 md:grid-cols-3">
+        {STEPS.map(({ icon: Icon, title, text }) => (
+          <li key={title} className="flex gap-3">
+            <Icon className="mt-0.5 size-5 shrink-0 text-primary" weight="duotone" />
+            <div>
+              <h2 className="text-sm font-medium">{title}</h2>
+              <p className="text-sm text-muted-foreground">{text}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
       <Settings />
       <div className="mt-8 grid gap-5">
-        {Object.keys(playTime(sessions, last)).length > 0 && <Split month={last} />}
         <Split month={month} running />
+        <h2 className="mt-3 font-semibold">Past payouts</h2>
+        {played && <Split month={last} />}
+        {older.map((p) => (
+          <div key={p.month} className="flex justify-between border-t pt-3 text-sm">
+            <span>{monthName(p.month)}</span>
+            <span className="text-muted-foreground tabular-nums">
+              {sats(p.sats)} sats to {games(p.games)}
+            </span>
+          </div>
+        ))}
+        {!played && !older.length && (
+          <p className="text-sm text-muted-foreground">Nothing paid yet.</p>
+        )}
       </div>
     </>
   );
