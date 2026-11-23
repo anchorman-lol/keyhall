@@ -5,7 +5,7 @@ import { EyeIcon, EyeSlashIcon, UsersIcon } from "@phosphor-icons/react";
 import { Launcher } from "./launcher.ts";
 import { Cover } from "./Library.tsx";
 
-const MODES = [
+export const MODES = [
   {
     mode: "public",
     icon: EyeIcon,

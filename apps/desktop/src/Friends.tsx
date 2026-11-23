@@ -1,9 +1,11 @@
 import { findGame, playing } from "@keyhall/core/launcher";
 import { friendName, type Friend } from "@keyhall/core/presence";
-import { EyeIcon } from "@phosphor-icons/react";
+import { Popover, PopoverContent, PopoverTrigger } from "@keyhall/ui/components/popover";
+import { CaretRightIcon, CheckIcon, EyeIcon } from "@phosphor-icons/react";
 import { useState, type ReactNode } from "react";
 import { Launcher } from "./launcher.ts";
 import { GameIcon } from "./Library.tsx";
+import { MODES } from "./PresenceSettings.tsx";
 
 export function Avatar({
   friend,
@@ -31,12 +33,11 @@ export function Avatar({
   );
 }
 
-const MODE = { public: "Public", friends: "Friends only", hidden: "Hidden" };
-
 export function FriendsColumn() {
   const context = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
   const { friends, presence } = context;
+  const [open, setOpen] = useState(false);
   const active = playing(context);
   const idle = (friends ?? []).filter((f) => !active.some((p) => p.friend === f));
   const heading = "flex h-7 items-center px-2 text-[12px] font-medium text-muted-foreground";
@@ -98,14 +99,51 @@ export function FriendsColumn() {
           </>
         )}
       </div>
-      <button
-        onClick={() => send({ type: "view", view: "settings" })}
-        className="flex shrink-0 items-center gap-2 border-t border-white/[0.06] px-5 py-3 text-left text-[12px] text-muted-foreground hover:text-foreground"
-      >
-        <EyeIcon className="size-4" />
-        <span className="flex-1">Your presence</span>
-        <span className="text-foreground/90">{MODE[presence.mode]}</span>
-      </button>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger className="flex shrink-0 items-center gap-2 border-t border-white/[0.06] px-5 py-3 text-left text-[12px] text-muted-foreground hover:text-foreground data-popup-open:text-foreground">
+          <EyeIcon className="size-4" />
+          <span className="flex-1">Your presence</span>
+          <span className="text-foreground/90">
+            {MODES.find((m) => m.mode === presence.mode)!.label}
+          </span>
+        </PopoverTrigger>
+        <PopoverContent side="top" align="end" className="w-64 gap-0 rounded-xl p-1.5">
+          <div
+            role="radiogroup"
+            aria-label="Your presence"
+            className="mb-1 border-b border-white/[0.06] pb-1"
+          >
+            {MODES.map(({ mode, icon: Icon, label, text }) => (
+              <button
+                key={mode}
+                role="radio"
+                aria-checked={presence.mode === mode}
+                onClick={() => send({ type: "presence.mode", mode })}
+                className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-white/[0.05]"
+              >
+                <Icon className="mt-0.5 size-4 shrink-0" />
+                <span className="grid min-w-0 flex-1 gap-0.5 leading-tight">
+                  <span className="text-[13px]">{label}</span>
+                  <span className="text-[11px] text-muted-foreground">{text}</span>
+                </span>
+                {presence.mode === mode && (
+                  <CheckIcon weight="bold" className="mt-0.5 size-3.5 text-primary" />
+                )}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              setOpen(false);
+              send({ type: "view", view: "settings" });
+            }}
+            className="flex h-9 w-full items-center gap-1 rounded-lg px-2 text-left text-[12px] text-muted-foreground hover:text-foreground"
+          >
+            <span className="flex-1">Presence settings</span>
+            <CaretRightIcon className="size-3.5" />
+          </button>
+        </PopoverContent>
+      </Popover>
     </aside>
   );
 }
