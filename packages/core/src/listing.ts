@@ -108,5 +108,16 @@ export function parseListings(events: NostrEvent[], curated = false): Game[] {
     const seen = game && newest.get(game.coordinate);
     if (game && (!seen || seen.createdAt < game.createdAt)) newest.set(game.coordinate, game);
   }
-  return [...newest.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const byUrl = new Map<string, Game>();
+  for (const game of newest.values()) {
+    const seen = byUrl.get(gameKey(game));
+    if (!seen || better(game, seen)) byUrl.set(gameKey(game), game);
+  }
+  return [...byUrl.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
+
+export const gameKey = (g: Game) => g.url.replace(/\/+$/, "");
+
+const ownsRepo = (g: Game) => g.repos.some((a) => a.split(":")[1] === g.pubkey);
+const better = (a: Game, b: Game) =>
+  ownsRepo(a) === ownsRepo(b) ? a.createdAt > b.createdAt : ownsRepo(a);
