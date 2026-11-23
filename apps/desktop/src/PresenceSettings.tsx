@@ -3,7 +3,6 @@ import { Badge } from "@keyhall/ui/components/badge";
 import { Button } from "@keyhall/ui/components/button";
 import { EyeIcon, EyeSlashIcon, UsersIcon } from "@phosphor-icons/react";
 import { Launcher } from "./launcher.ts";
-import { Cover } from "./Library.tsx";
 
 export const MODES = [
   {
@@ -57,17 +56,14 @@ export function ModeToggle({ coordinate }: { coordinate: string }) {
 }
 
 export function PresenceSettings() {
-  const { presence, listings, observed, friends } = Launcher.useSelector((s) => s.context);
+  const { presence, friends } = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
-  const listed = Object.values(listings).filter(
-    (g) => observed[g.coordinate] || presence.games[g.coordinate],
-  );
   return (
-    <div className="max-w-3xl">
-      <h1 className="text-2xl font-semibold">Presence</h1>
+    <section>
+      <h2 className="text-xl font-semibold">Presence</h2>
       <p className="mt-2 text-muted-foreground">
         Shows “Playing …” next to your name. It updates only when a game window opens or closes, so
-        each session publishes 2 events.
+        each session publishes 2 events. This is your default; each game's page can override it.
       </p>
       <div role="radiogroup" className="mt-6 grid grid-cols-3 gap-3">
         {MODES.map(({ mode, icon: Icon, label, text, detail }) => (
@@ -100,30 +96,11 @@ export function PresenceSettings() {
             time you play, which re-sends it to everyone left.
           </span>
         </p>
-        <div>
-          <b>Per-game overrides</b>
-          <p className="text-muted-foreground">Games without an override use the default</p>
-        </div>
-        <div className="grid gap-2">
-          {listed.length ? (
-            listed.map((g) => (
-              <div key={g.coordinate} className="flex items-center gap-3">
-                <Cover game={g} className="size-8 rounded-md text-sm" />
-                <b className="flex-1 truncate">{g.name}</b>
-                <ModeToggle coordinate={g.coordinate} />
-              </div>
-            ))
-          ) : (
-            <p className="text-muted-foreground">
-              Games you've played show here. You can also set one on a game's page.
-            </p>
-          )}
-        </div>
       </div>
       <p className="mt-8 rounded-xl bg-muted p-4 text-sm">
         <b>What relays can still see:</b> an unnamed presence key posting when your sessions start
         and stop, and, once, the people your circle key was sent to.
       </p>
-    </div>
+    </section>
   );
 }
