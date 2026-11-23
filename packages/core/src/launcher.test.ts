@@ -39,10 +39,16 @@ const signed = (key = secret) =>
 const game = {
   coordinate: "31990:abc:blockstr",
   name: "Blockstr",
+  url: "https://blockstr.io",
   createdAt: 100,
   signIn: "signer",
 } as Game;
-const spam = { coordinate: "31990:def:spam", name: "Spam", createdAt: 100 } as Game;
+const spam = {
+  coordinate: "31990:def:spam",
+  name: "Spam",
+  url: "https://spam.io",
+  createdAt: 100,
+} as Game;
 const curatorSecret = generateSecretKey();
 const curatorKey = getPublicKey(curatorSecret);
 const listOf = (ref: ListRef, games: Game[]): CuratorList => ({

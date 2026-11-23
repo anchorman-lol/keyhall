@@ -14,7 +14,8 @@ import {
 } from "./sources";
 
 const curator = { pubkey: "c".repeat(64) };
-const game = (name: string) => ({ coordinate: `31990:p:${name}`, name }) as Game;
+const game = (name: string) =>
+  ({ coordinate: `31990:p:${name}`, name, url: `https://${name}.io` }) as Game;
 
 describe("source settings", () => {
   it("starts with Keyhall picks on and unvetted listings off", () => {
@@ -65,6 +66,15 @@ describe("union", () => {
       { game: chess, from: [PICKS_ID, curator.pubkey, UNVETTED_ID] },
       { game: word5, from: [PICKS_ID] },
       { game: wwz, from: [UNVETTED_ID] },
+    ]);
+  });
+
+  it("merges another author's copy of a picked game into the pick's entry", () => {
+    const pick = { ...game("Chess"), url: "https://chess.io" };
+    const copy = { ...game("Chess2"), url: "https://chess.io/" };
+    const sources = sourceList({ ...defaultSources, unvetted: true });
+    expect(union(sources, { [PICKS_ID]: [pick], [UNVETTED_ID]: [copy] })).toEqual([
+      { game: pick, from: [PICKS_ID, UNVETTED_ID] },
     ]);
   });
 

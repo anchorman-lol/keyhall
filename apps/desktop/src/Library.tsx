@@ -33,7 +33,7 @@ import {
   StackIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { SignInBadge, verifiers } from "./badges.tsx";
 import { FriendsPlaying } from "./Friends.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
@@ -41,30 +41,59 @@ import { Launcher, minutes, useNow } from "./launcher.ts";
 import { RelayToggles } from "./Relays.tsx";
 import { Sources } from "./Sources.tsx";
 
-export function Cover({ game, className }: { game: Game; className: string }) {
-  const art = game.banner ?? game.picture;
-  return art ? (
-    <img src={art} alt="" className={cn("bg-muted object-cover", className)} />
+function Art({
+  srcs,
+  className,
+  fallback,
+}: {
+  srcs: (string | undefined)[];
+  className: string;
+  fallback: ReactNode;
+}) {
+  const [failed, setFailed] = useState<string[]>([]);
+  const src = srcs.find((s) => s && !failed.includes(s));
+  return src ? (
+    <img
+      src={src}
+      alt=""
+      onError={() => setFailed([...failed, src])}
+      className={cn("bg-muted object-cover", className)}
+    />
   ) : (
-    <div className={cn("grid place-items-center bg-muted text-muted-foreground", className)}>
-      {game.name.slice(0, 1)}
-    </div>
+    fallback
+  );
+}
+
+export function Cover({ game, className }: { game: Game; className: string }) {
+  return (
+    <Art
+      srcs={[game.banner, game.picture]}
+      className={className}
+      fallback={
+        <div className={cn("grid place-items-center bg-muted text-muted-foreground", className)}>
+          {game.name.slice(0, 1)}
+        </div>
+      }
+    />
   );
 }
 
 export function GameIcon({ game, className }: { game: Game; className: string }) {
-  const art = game.picture ?? game.banner;
-  return art ? (
-    <img src={art} alt="" className={cn("shrink-0 bg-muted object-cover", className)} />
-  ) : (
-    <span
-      className={cn(
-        "grid shrink-0 place-items-center bg-primary/15 font-semibold text-primary uppercase",
-        className,
-      )}
-    >
-      {game.name.slice(0, 1)}
-    </span>
+  return (
+    <Art
+      srcs={[game.picture, game.banner]}
+      className={cn("shrink-0", className)}
+      fallback={
+        <span
+          className={cn(
+            "grid shrink-0 place-items-center bg-primary/15 font-semibold text-primary uppercase",
+            className,
+          )}
+        >
+          {game.name.slice(0, 1)}
+        </span>
+      }
+    />
   );
 }
 
@@ -360,10 +389,10 @@ export function Library({
                   onClick={() => send({ type: "select", game })}
                   className="group/tile flex min-w-0 flex-col gap-2 text-left outline-none"
                 >
-                  <span className="relative block overflow-hidden rounded-lg ring-1 ring-white/[0.07] transition-shadow group-hover/tile:ring-white/25 group-focus-visible/tile:ring-2 group-focus-visible/tile:ring-ring">
+                  <span className="relative block aspect-[16/10] overflow-hidden rounded-lg ring-1 ring-white/[0.07] transition-shadow group-hover/tile:ring-white/25 group-focus-visible/tile:ring-2 group-focus-visible/tile:ring-ring">
                     <Cover
                       game={game}
-                      className="aspect-[16/10] w-full text-4xl transition-transform duration-300 ease-out group-hover/tile:scale-[1.025] motion-reduce:transition-none"
+                      className="absolute inset-0 size-full text-4xl transition-transform duration-300 ease-out group-hover/tile:scale-[1.025] motion-reduce:transition-none"
                     />
                     {since.has(game.coordinate) && (
                       <span className="absolute top-2 left-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
