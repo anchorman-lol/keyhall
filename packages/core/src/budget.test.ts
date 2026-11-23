@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { monthKey, monthRange, playTime, previousMonth, split } from "./budget";
+import { monthKey, monthRange, payouts, playTime, previousMonth, split } from "./budget";
 
 const minutes = (m: number) => m * 60;
 
@@ -73,5 +73,20 @@ describe("play time", () => {
       { coordinate: "c", start: at("2026-12-02T10:00"), end: at("2026-12-02T11:00") },
     ];
     expect(playTime(sessions, "2026-11")).toEqual({ a: minutes(90), b: minutes(10) });
+  });
+});
+
+describe("payouts", () => {
+  it("sums each paid month, newest first, counting games rather than developers", () => {
+    expect(
+      payouts({
+        "2026-08": { "31990:a:x pk1": 300 },
+        "2026-09": { "31990:a:x pk1": 600, "31990:a:x pk2": 400, "31990:b:y pk3": 1000 },
+        "2026-10": {},
+      }),
+    ).toEqual([
+      { month: "2026-09", sats: 2000, games: 2 },
+      { month: "2026-08", sats: 300, games: 1 },
+    ]);
   });
 });

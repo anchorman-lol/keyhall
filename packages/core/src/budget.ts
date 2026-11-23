@@ -79,3 +79,13 @@ export function split(
   }
   return { shares, reserve };
 }
+
+export const payouts = (paid: Record<string, Record<string, number>>) =>
+  Object.entries(paid)
+    .filter(([, keys]) => Object.keys(keys).length)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([month, keys]) => ({
+      month,
+      sats: Object.values(keys).reduce((a, b) => a + b, 0),
+      games: new Set(Object.keys(keys).map((k) => k.split(" ")[0])).size,
+    }));
