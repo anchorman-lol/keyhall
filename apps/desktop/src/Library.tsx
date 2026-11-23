@@ -24,7 +24,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@keyhall/ui/components/
 import { Switch } from "@keyhall/ui/components/switch";
 import { cn } from "@keyhall/ui/lib/utils";
 import {
-  BroadcastIcon,
   CaretDownIcon,
   CheckIcon,
   FunnelSimpleIcon,
@@ -37,7 +36,7 @@ import type { ReactNode } from "react";
 import { SignInBadge, verifiers } from "./badges.tsx";
 import { FriendsPlaying } from "./Friends.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
-import { Launcher, minutes, useNow } from "./launcher.ts";
+import { Launcher, useNow } from "./launcher.ts";
 import { RelayToggles } from "./Relays.tsx";
 import { Sources } from "./Sources.tsx";
 
@@ -133,7 +132,7 @@ function Toolbar({
   filters: Filters;
   setFilters: (f: Filters) => void;
 }) {
-  const { sources, npub, relays } = Launcher.useSelector((s) => s.context);
+  const { sources, npub } = Launcher.useSelector((s) => s.context);
   const set = (f: Partial<Filters>) => setFilters({ ...filters, ...f });
   const on = sourceList(sources).filter((s) => s.enabled).length;
   const active = activeFilters(filters);
@@ -167,19 +166,6 @@ function Toolbar({
             <div className="py-1.5">
               <Sources />
             </div>
-          </Menu>
-          <Menu
-            trigger={
-              <>
-                <BroadcastIcon data-icon="inline-start" />
-                Relays
-                <span className="text-muted-foreground tabular-nums">
-                  {relays.filter((r) => r.enabled).length}/{relays.length}
-                </span>
-              </>
-            }
-          >
-            <RelayToggles />
           </Menu>
           <Menu
             trigger={
@@ -224,6 +210,10 @@ function Toolbar({
                 </button>
               ))}
             </div>
+            <div className="px-2 pt-2.5 pb-1 text-[12px] font-medium text-muted-foreground">
+              Relays
+            </div>
+            <RelayToggles />
           </Menu>
           <Popover>
             <PopoverTrigger
@@ -289,7 +279,7 @@ export function Library({
   const now = useNow();
   const friends = playing(context, now);
   const played = playTime(context.sessions, monthKey(new Date(now * 1000)));
-  const since = new Map(running(context).map((r) => [r.game.coordinate, r.since]));
+  const open = new Set(running(context).map((r) => r.game.coordinate));
   const entries = library(context);
   const games = filterGames(
     entries.map((e) => e.game),
@@ -353,7 +343,6 @@ export function Library({
           <div className="grid grid-cols-[repeat(auto-fill,minmax(184px,1fr))] content-start gap-x-5 gap-y-6 px-6 pt-5 pb-8">
             {games.map((game) => {
               const signIn = signInOf(context, game);
-              const started = since.get(game.coordinate);
               return (
                 <button
                   key={game.coordinate}
@@ -365,9 +354,9 @@ export function Library({
                       game={game}
                       className="aspect-[16/10] w-full text-4xl transition-transform duration-300 ease-out group-hover/tile:scale-[1.025] motion-reduce:transition-none"
                     />
-                    {since.has(game.coordinate) && (
+                    {open.has(game.coordinate) && (
                       <span className="absolute top-2 left-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
-                        <Live /> {started ? minutes(now - started) : "Running"}
+                        <Live /> Running
                       </span>
                     )}
                   </span>

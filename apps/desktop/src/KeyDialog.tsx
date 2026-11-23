@@ -61,9 +61,9 @@ export function SignOut() {
   const { send } = Launcher.useActorRef();
   if (!npub) return null;
   return (
-    <div className="mt-10 max-w-3xl border-t pt-8">
-      <h2 className="mb-3 font-semibold">Your key</h2>
-      <p className="font-mono text-xs break-all text-muted-foreground">{npub}</p>
+    <section>
+      <h2 className="text-xl font-semibold">Your key</h2>
+      <p className="mt-3 font-mono text-xs break-all text-muted-foreground">{npub}</p>
       <Dialog>
         <DialogTrigger render={<Button variant="destructive" className="mt-4" />}>
           Sign out
@@ -89,6 +89,6 @@ export function SignOut() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </section>
   );
 }

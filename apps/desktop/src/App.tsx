@@ -24,17 +24,21 @@ function Settings() {
   }, [context.view]);
   return (
     <div className="h-full overflow-y-auto px-8 pt-6 pb-10">
-      <PresenceSettings />
-      <div ref={relays} className="mt-10 border-t pt-8">
-        <RelaySettings />
+      <div className="mx-auto grid max-w-3xl gap-8 [&>*+*]:border-t [&>*+*]:pt-8">
+        <PresenceSettings />
+        <div ref={relays}>
+          <RelaySettings />
+        </div>
+        <section>
+          <h2 className="mb-3 text-xl font-semibold">Signer activity</h2>
+          {context.calls.length ? (
+            <SignerLog calls={context.calls.slice(-20).reverse()} name={name} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing signed since Keyhall started.</p>
+          )}
+        </section>
+        <SignOut />
       </div>
-      <h2 className="mt-10 mb-3 font-semibold">Signer activity</h2>
-      {context.calls.length ? (
-        <SignerLog calls={context.calls.slice(-20).reverse()} name={name} />
-      ) : (
-        <p className="text-sm text-muted-foreground">Nothing signed since Keyhall started.</p>
-      )}
-      <SignOut />
     </div>
   );
 }

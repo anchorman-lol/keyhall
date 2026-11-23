@@ -3,7 +3,8 @@ import { Button } from "@keyhall/ui/components/button";
 import { Input } from "@keyhall/ui/components/input";
 import { Switch } from "@keyhall/ui/components/switch";
 import { cn } from "@keyhall/ui/lib/utils";
-import { PlusIcon, XIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
+import { useState } from "react";
 import { Launcher } from "./launcher.ts";
 
 const USES: Record<Use, [string, string]> = {
@@ -36,23 +37,66 @@ function Uses({ relay, title, uses }: { relay: Relay; title: string; uses: reado
   const { send } = Launcher.useActorRef();
   const on: readonly Use[] = [...relay.read, ...relay.write];
   return (
-    <div className="grid gap-1.5">
+    <div className="grid content-start gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">{title}</span>
-      <div className="flex flex-wrap gap-1.5">
-        {uses.map((use) => (
-          <button
-            key={use}
-            title={USES[use][1]}
-            aria-pressed={on.includes(use)}
+      {uses.map((use) => (
+        <label
+          key={use}
+          title={USES[use][1]}
+          className="flex items-center gap-2 text-xs has-disabled:opacity-50"
+        >
+          <input
+            type="checkbox"
+            checked={on.includes(use)}
             disabled={!relay.enabled}
-            onClick={() => send({ type: "relay.use", url: relay.url, use, on: !on.includes(use) })}
-            className="h-7 rounded-full px-3 text-xs text-muted-foreground ring-1 ring-white/10 hover:text-foreground disabled:opacity-50 aria-pressed:bg-primary/[0.12] aria-pressed:text-primary aria-pressed:ring-primary/30"
-          >
-            {USES[use][0]}
-          </button>
-        ))}
-      </div>
+            onChange={(e) => send({ type: "relay.use", url: relay.url, use, on: e.target.checked })}
+            className="size-3.5 accent-primary"
+          />
+          {USES[use][0]}
+        </label>
+      ))}
     </div>
+  );
+}
+
+function RelayRow({ relay }: { relay: Relay }) {
+  const { send } = Launcher.useActorRef();
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="rounded-xl bg-card px-4 py-2.5 ring-1 ring-foreground/5">
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={relay.enabled}
+          onCheckedChange={() => send({ type: "relay.toggle", url: relay.url })}
+          aria-label={relay.url}
+        />
+        <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{relay.url}</span>
+        <Status relay={relay} />
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={`${relay.url} uses`}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          <CaretDownIcon className={cn(open && "rotate-180")} />
+        </Button>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={`Remove ${relay.url}`}
+          onClick={() => send({ type: "relay.remove", url: relay.url })}
+        >
+          <XIcon />
+        </Button>
+      </div>
+      {open && (
+        <div className="mt-3 mb-1 grid grid-cols-2 gap-4 pl-12">
+          <Uses relay={relay} title="Reads" uses={READS} />
+          <Uses relay={relay} title="Publishes" uses={WRITES} />
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -60,40 +104,15 @@ export function RelaySettings() {
   const { relays, relayError } = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
   return (
-    <section id="relays" className="max-w-3xl">
-      <h1 className="text-2xl font-semibold">Relays</h1>
+    <section id="relays">
+      <h2 className="text-xl font-semibold">Relays</h2>
       <p className="mt-2 text-muted-foreground">
         Keyhall reads games, lists and friends from these relays and publishes to them. Pick what
         each one is used for. Changing them loads your library again.
       </p>
-      <ul className="mt-6 grid gap-3">
+      <ul className="mt-6 grid gap-2">
         {relays.map((relay) => (
-          <li
-            key={relay.url}
-            className="grid gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/5"
-          >
-            <div className="flex items-center gap-3">
-              <Switch
-                checked={relay.enabled}
-                onCheckedChange={() => send({ type: "relay.toggle", url: relay.url })}
-                aria-label={relay.url}
-              />
-              <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{relay.url}</span>
-              <Status relay={relay} />
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label={`Remove ${relay.url}`}
-                onClick={() => send({ type: "relay.remove", url: relay.url })}
-              >
-                <XIcon />
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-4 pl-12">
-              <Uses relay={relay} title="Reads" uses={READS} />
-              <Uses relay={relay} title="Publishes" uses={WRITES} />
-            </div>
-          </li>
+          <RelayRow key={relay.url} relay={relay} />
         ))}
       </ul>
       {!relays.length && (
