@@ -27,7 +27,7 @@ import {
   type Stored,
 } from "./launcher";
 import type { Game } from "./listing";
-import { circlePubkey, circleStatus, publicStatus, readStatus } from "./presence";
+import { circlePubkey, circleStatus, DEFAULT_PRESENCE, publicStatus, readStatus } from "./presence";
 import { signerFor } from "./signer.testing";
 import { defaultSources, PICKS_ID, UNVETTED_ID } from "./sources";
 
@@ -79,6 +79,7 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
   const all: LauncherDeps = {
     keyStatus: async () => null,
     saveKey: async () => npub,
+    forgetKey: async () => {},
     fetchLists: async (ref) => [listOf(ref, relays[ref.pubkey] ?? [])],
     fetchListings: async (coordinates) =>
       [game, spam].filter((g) => coordinates.includes(g.coordinate)),
@@ -139,6 +140,68 @@ describe("key", () => {
   it("starts ready when a key is stored", async () => {
     const { actor } = start({ keyStatus: async () => npub });
     await waitFor(actor, (s) => s.matches({ key: "ready" }));
+  });
+
+  it("signs out after closing games and clearing presence, leaving nothing of the old key", async () => {
+    const mock = relay();
+    let key = secret;
+    const next = generateSecretKey();
+    const forgetKey = vi.fn(async () => {
+      expect(mock.published.at(-1)).toMatchObject({ kind: 30315, content: "" });
+    });
+    const fetchFriends = vi.fn(async () => friends);
+    const { actor, emit, deps } = start({
+      ...mock,
+      keyStatus: async () => npub,
+      saveKey: async () => npubEncode(getPublicKey(next)),
+      forgetKey,
+      fetchFriends,
+      closeGame: vi.fn(() => emit({ type: "closed", coordinate: game.coordinate })),
+      signEvent: (t) => signerFor(key).signEvent(t),
+      nip44Encrypt: (p, t) => signerFor(key).nip44Encrypt(p, t),
+    });
+    await waitFor(actor, (s) => s.matches({ friends: "ready" }));
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => !!s.context.published);
+    emit({ type: "observed", coordinate: game.coordinate, kinds: [1] });
+    emit({ type: "shim", call: { coordinate: game.coordinate, event: signed() } });
+    const { circle } = actor.getSnapshot().context;
+    actor.send({ type: "profile.edit" });
+    await waitFor(actor, (s) => s.matches({ profile: "editing" }));
+
+    actor.send({ type: "key.signOut" });
+    await waitFor(actor, (s) => s.matches({ key: "setup" }));
+    expect(actor.getSnapshot().matches({ profile: "waiting" })).toBe(true);
+    expect(deps.closeGame).toHaveBeenCalledWith("game-1");
+    expect(forgetKey).toHaveBeenCalledOnce();
+    expect(actor.getSnapshot().context).toMatchObject({
+      npub: null,
+      windows: {},
+      calls: [],
+      observed: {},
+      friends: undefined,
+      profile: undefined,
+      profileEvent: undefined,
+      profileError: "",
+      statuses: {},
+      presence: DEFAULT_PRESENCE,
+      circle: undefined,
+      published: undefined,
+    });
+    expect(deps.saveObserved).toHaveBeenLastCalledWith({});
+    expect(deps.savePresence).toHaveBeenLastCalledWith(DEFAULT_PRESENCE, undefined);
+
+    key = next;
+    actor.send({ type: "key.create" });
+    await waitFor(actor, (s) => s.matches({ friends: "ready" }));
+    expect(fetchFriends).toHaveBeenLastCalledWith(getPublicKey(next));
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => !!s.context.published);
+    expect(actor.getSnapshot().context.circle!.secret).not.toBe(circle!.secret);
+    const wrap = mock.published.findLast((e) => e.kind === 1059)!;
+    expect(unwrapEvent(wrap, wrap.tags[0]![1] === friends[0]!.pubkey ? sam : mira).pubkey).toBe(
+      getPublicKey(next),
+    );
   });
 
   it("tells an unreadable keychain apart from a missing key", async () => {

@@ -13,6 +13,7 @@
     "allow-key-status",
     "allow-generate-key",
     "allow-import-key",
+    "allow-sign-out",
     "allow-open-game",
     "allow-check-game",
     "allow-close-game",

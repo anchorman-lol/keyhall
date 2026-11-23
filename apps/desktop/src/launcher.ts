@@ -49,6 +49,7 @@ const machine = launcherMachine(
   {
     keyStatus: () => invoke("key_status"),
     saveKey: (command, nsec) => invoke(command, { nsec }),
+    forgetKey: () => invoke("sign_out"),
     fetchLists,
     fetchListings,
     fetchGames,

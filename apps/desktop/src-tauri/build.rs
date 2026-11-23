@@ -4,6 +4,7 @@ fn main() {
             "key_status",
             "generate_key",
             "import_key",
+            "sign_out",
             "open_game",
             "check_game",
             "close_game",

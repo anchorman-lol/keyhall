@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { BudgetPage } from "./BudgetPage.tsx";
 import { FriendsColumn } from "./Friends.tsx";
 import { GamePage } from "./GamePage.tsx";
+import { SignOut } from "./KeyDialog.tsx";
 import { KeyWarning } from "./KeyWarning.tsx";
 import { Launcher } from "./launcher.ts";
 import { Library } from "./Library.tsx";
@@ -33,6 +34,7 @@ function Settings() {
       ) : (
         <p className="text-sm text-muted-foreground">Nothing signed since Keyhall started.</p>
       )}
+      <SignOut />
     </div>
   );
 }
