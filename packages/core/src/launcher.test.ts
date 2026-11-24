@@ -97,6 +97,8 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     openGame: async () => "game-1",
     checkGame: vi.fn(),
     closeGame: vi.fn(),
+    openPanel: vi.fn(),
+    saveHotkey: vi.fn(),
     listen: (send) => {
       emit = send;
       return () => {};
@@ -562,6 +564,53 @@ describe("friends", () => {
     mock.deliver(finalizeEvent(publicStatus(game, now()), sam));
     mock.deliver(finalizeEvent(publicStatus(undefined, now() - 60), sam));
     expect(playing(actor.getSnapshot().context)).toHaveLength(1);
+  });
+});
+
+describe("overlay", () => {
+  it("opens over the game its hotkey was pressed in, with the session and friends playing", async () => {
+    const mock = relay();
+    const openPanel = vi.fn();
+    const { actor, emit } = start({
+      keyStatus: async () => npub,
+      fetchFriends: async () => friends,
+      sessions: async () => [{ coordinate: game.coordinate, start: 100, end: 160 }],
+      openPanel,
+      ...mock,
+    });
+    await waitFor(
+      actor,
+      (s) => s.matches({ friends: "ready" }) && !!findGame(s.context, game.coordinate),
+    );
+    mock.deliver(finalizeEvent(publicStatus(game, now()), sam));
+    emit({ type: "panel", coordinate: game.coordinate, kind: "overlay" });
+    expect(openPanel).not.toHaveBeenCalled();
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => s.context.sessions.length > 0);
+    emit({ type: "panel", coordinate: game.coordinate, kind: "overlay" });
+    expect(openPanel).toHaveBeenCalledWith("game-1", "overlay", {
+      game: "Blockstr",
+      since: 100,
+      hotkey: "Shift+Tab",
+      friends: [
+        { friend: friends[0], status: expect.objectContaining({ content: "Playing Blockstr" }) },
+      ],
+    });
+  });
+
+  it("gives games opened after a hotkey change the new hotkey", async () => {
+    const openGame = vi.fn(async () => "game-1");
+    const saveHotkey = vi.fn();
+    const { actor } = start(
+      { keyStatus: async () => npub, openGame, saveHotkey },
+      { hotkey: "Ctrl+O" },
+    );
+    await waitFor(actor, (s) => s.matches({ key: "ready" }));
+    expect(actor.getSnapshot().context.hotkey).toBe("Ctrl+O");
+    actor.send({ type: "hotkey.set", hotkey: "Alt+K" });
+    expect(saveHotkey).toHaveBeenCalledWith("Alt+K");
+    actor.send({ type: "play", game });
+    expect(openGame).toHaveBeenCalledWith(game, "Alt+K");
   });
 });
 

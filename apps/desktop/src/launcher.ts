@@ -1,5 +1,5 @@
 import type { DmDeps } from "@keyhall/core/dm";
-import { launcherMachine, type ShimCall } from "@keyhall/core/launcher";
+import { launcherMachine, type LauncherEvent, type ShimCall } from "@keyhall/core/launcher";
 import {
   fetchFriends,
   fetchGames,
@@ -67,13 +67,15 @@ const machine = launcherMachine(
     fetchLabels,
     signLabel: (event) => invoke("sign_label", { event }),
     publish,
-    openGame: (game) =>
+    openGame: (game, hotkey) =>
       invoke("open_game", {
         name: game.name,
         coordinate: game.coordinate,
         url: game.url,
-        shim: shimScript(),
+        shim: shimScript(hotkey),
       }),
+    openPanel: (game, kind, props) => void invoke("open_panel", { game, kind, props }),
+    saveHotkey: (hotkey) => localStorage.setItem("hotkey", JSON.stringify(hotkey)),
     checkGame: (label) => void invoke("check_game", { label }),
     closeGame: (label) => void invoke("close_game", { label }),
     listen: (send) => {
@@ -84,6 +86,9 @@ const machine = launcherMachine(
         ),
         listen<{ coordinate: string }>("closed", ({ payload }) =>
           send({ type: "closed", ...payload }),
+        ),
+        listen<LauncherEvent & { type: "panel" }>("panel", ({ payload }) =>
+          send({ ...payload, type: "panel" }),
         ),
         listen<string>("key-field", ({ payload }) =>
           send({ type: "key-field", coordinate: payload }),
@@ -127,6 +132,7 @@ const machine = launcherMachine(
     relays,
     budget: JSON.parse(localStorage.getItem("budget") ?? "null") ?? undefined,
     friendsOpen: JSON.parse(localStorage.getItem("friendsOpen") ?? "null") ?? undefined,
+    hotkey: JSON.parse(localStorage.getItem("hotkey") ?? "null") ?? undefined,
     ...JSON.parse(localStorage.getItem("presence") ?? "{}"),
   },
 );

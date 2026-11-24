@@ -9,6 +9,7 @@ import { SignOut } from "./KeyDialog.tsx";
 import { Launcher } from "./launcher.ts";
 import { Library } from "./Library.tsx";
 import { Nav } from "./Nav.tsx";
+import { OverlayHotkey } from "./Overlay.tsx";
 import { PresenceSettings } from "./PresenceSettings.tsx";
 import { RelaySettings } from "./Relays.tsx";
 import { SignerLog } from "./SignerLog.tsx";
@@ -25,6 +26,7 @@ function Settings() {
     <div className="h-full overflow-y-auto px-8 pt-6 pb-10">
       <div className="mx-auto grid max-w-3xl gap-8 [&>*+*]:border-t [&>*+*]:pt-8">
         <PresenceSettings />
+        <OverlayHotkey />
         <div ref={relays}>
           <RelaySettings />
         </div>

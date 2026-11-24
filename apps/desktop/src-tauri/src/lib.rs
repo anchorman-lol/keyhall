@@ -29,12 +29,63 @@ const KEYCHAIN_SERVICE: &str = "lol.anchorman.keyhall";
 const KEYCHAIN_ACCOUNT: &str = "nsec";
 const WALLET_ACCOUNT: &str = "nwc";
 const UPDATE_INTERVAL: Duration = Duration::from_secs(4 * 60 * 60);
-const GAME_PERMISSIONS: [&str; 4] = [
+const GAME_PERMISSIONS: [&str; 5] = [
     "allow-nostr-get-public-key",
     "allow-nostr-sign-event",
     "allow-nostr-observe",
     "allow-nostr-key-field",
+    "allow-open-overlay",
 ];
+
+enum Layout {
+    Centered(f64, f64),
+    Fill,
+}
+
+/// A kind of Keyhall window over a game, labelled `<game>-<kind>-<id>`.
+struct Panel {
+    kind: &'static str,
+    layout: Layout,
+    permissions: &'static [&'static str],
+    /// Whether the launcher may open it with `open_panel`; notices open only from Rust.
+    launcher: bool,
+}
+
+const PANELS: [Panel; 2] = [
+    Panel {
+        kind: "notice",
+        layout: Layout::Centered(420.0, 260.0),
+        permissions: &["allow-answer-notice"],
+        launcher: false,
+    },
+    Panel {
+        kind: "overlay",
+        layout: Layout::Fill,
+        permissions: &["allow-close-panel"],
+        launcher: true,
+    },
+];
+
+fn panel_of(label: &str) -> Option<(&'static Panel, &str)> {
+    let (_, rest) = label.strip_prefix("game-")?.split_once('-')?;
+    let (kind, id) = rest.split_once('-')?;
+    Some((PANELS.iter().find(|p| p.kind == kind)?, id))
+}
+
+fn launcher_panel(kind: &str) -> Result<&'static Panel, String> {
+    PANELS
+        .iter()
+        .find(|p| p.kind == kind && p.launcher)
+        .ok_or_else(|| format!("The launcher can't open a {kind} panel"))
+}
+
+fn panel_capability(panel: &Panel) -> CapabilityBuilder {
+    panel.permissions.iter().fold(
+        CapabilityBuilder::new(format!("panel-{}", panel.kind))
+            .window(format!("game-*-{}-*", panel.kind)),
+        |c, p| c.permission(*p),
+    )
+}
 
 #[derive(Clone)]
 struct Game {
@@ -264,9 +315,9 @@ fn open_game(
     let coordinate_closed = coordinate.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::Destroyed = event {
-            for (label, notice) in app.webview_windows() {
-                if label.starts_with(&format!("{closed}-notice-")) {
-                    let _ = notice.destroy();
+            for (label, panel) in app.webview_windows() {
+                if label.starts_with(&format!("{closed}-")) {
+                    let _ = panel.destroy();
                 }
             }
             app.state::<Mutex<Meter>>()
@@ -306,11 +357,16 @@ fn close_game(app: AppHandle, state: State<Launcher>, label: String) -> Result<(
     }
 }
 
-/// Shows a Keyhall notice in its own window over the game, so the game can't script it.
-fn show_notice(game: &WebviewWindow, id: &str, notice: serde_json::Value) -> Result<(), String> {
-    let label = format!("{}-notice-{id}", game.label());
-    if game.get_webview_window(&label).is_some() {
-        return Ok(());
+/// Shows a Keyhall page in its own window over the game, so the game can't script it.
+fn show_panel(
+    game: &WebviewWindow,
+    panel: &Panel,
+    id: &str,
+    props: serde_json::Value,
+) -> Result<(), String> {
+    let label = format!("{}-{}-{id}", game.label(), panel.kind);
+    if let Some(window) = game.get_webview_window(&label) {
+        return window.set_focus().map_err(|e| e.to_string());
     }
     let scale = game.scale_factor().map_err(|e| e.to_string())?;
     let at: LogicalPosition<f64> = game
@@ -321,14 +377,20 @@ fn show_notice(game: &WebviewWindow, id: &str, notice: serde_json::Value) -> Res
         .inner_size()
         .map_err(|e| e.to_string())?
         .to_logical(scale);
-    let width = 420.0;
-    let height = if notice["kind"].is_null() { 200.0 } else { 280.0 };
+    let fill = matches!(panel.layout, Layout::Fill);
+    let (width, height) = match panel.layout {
+        Layout::Centered(width, height) => (width, height),
+        Layout::Fill => (size.width, size.height),
+    };
+    let page = json!({"kind": panel.kind, "props": props});
     let window = WebviewWindowBuilder::new(game, &label, WebviewUrl::App("index.html".into()))
-        .initialization_script(format!("window.notice = {notice};"))
+        .initialization_script(format!("window.panel = {page};"))
         .parent(game)
         .map_err(|e| e.to_string())?
         .decorations(false)
         .resizable(false)
+        .transparent(fill)
+        .shadow(!fill)
         .inner_size(width, height)
         .position(
             at.x + (size.width - width) / 2.0,
@@ -337,24 +399,66 @@ fn show_notice(game: &WebviewWindow, id: &str, notice: serde_json::Value) -> Res
         .build()
         .map_err(|e| e.to_string())?;
     let app = game.app_handle().clone();
-    let id = id.to_string();
+    let label = window.label().to_string();
     window.on_window_event(move |event| {
-        if let WindowEvent::Destroyed = event {
-            app.state::<Launcher>().answer(&id, false);
+        if let (WindowEvent::Destroyed, Some((panel, id))) = (event, panel_of(&label))
+            && panel.kind == "notice"
+        {
+            app.state::<Launcher>().answer(id, false);
         }
     });
     let _ = game.set_focus();
     window.set_focus().map_err(|e| e.to_string())
 }
 
+fn notice(game: &WebviewWindow, id: &str, props: serde_json::Value) -> Result<(), String> {
+    show_panel(game, &PANELS[0], id, props)
+}
+
+#[tauri::command]
+fn open_panel(
+    app: AppHandle,
+    state: State<Launcher>,
+    game: String,
+    kind: String,
+    props: serde_json::Value,
+) -> Result<(), String> {
+    let panel = launcher_panel(&kind)?;
+    let window = app
+        .get_webview_window(&game)
+        .ok_or("The game window is closed")?;
+    state.game(&window)?;
+    show_panel(&window, panel, "0", props)
+}
+
+#[tauri::command]
+fn close_panel(window: WebviewWindow) -> Result<(), String> {
+    panel_of(window.label()).ok_or("not a panel")?;
+    window.destroy().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn answer_notice(window: WebviewWindow, state: State<Launcher>, allow: bool) -> Result<(), String> {
-    let (_, id) = window
-        .label()
-        .rsplit_once("-notice-")
-        .ok_or("not a notice")?;
-    state.answer(id, allow);
+    match panel_of(window.label()) {
+        Some((panel, id)) if panel.kind == "notice" => state.answer(id, allow),
+        _ => return Err("not a notice".into()),
+    }
     window.destroy().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_overlay(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<Launcher>,
+) -> Result<(), String> {
+    let game = state.game(&window)?;
+    app.emit_to(
+        "main",
+        "panel",
+        json!({"coordinate": game.coordinate, "kind": "overlay"}),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -417,7 +521,7 @@ async fn nostr_sign_event(
         let id = state.next_request.fetch_add(1, Ordering::Relaxed);
         let (reply, answer) = oneshot::channel();
         state.pending.lock().unwrap().insert(id, reply);
-        show_notice(
+        notice(
             &window,
             &id.to_string(),
             json!({"game": game.name, "kind": event.kind, "content": event.content}),
@@ -459,7 +563,7 @@ fn nostr_key_field(
     state: State<Launcher>,
 ) -> Result<(), String> {
     let game = state.game(&window)?;
-    show_notice(&window, "key", json!({"game": game.name}))?;
+    notice(&window, "key", json!({"game": game.name}))?;
     app.emit_to("main", "key-field", game.coordinate)
         .map_err(|e| e.to_string())
 }
@@ -525,6 +629,9 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             hide_traffic_lights(&app.get_webview_window("main").expect("main window"))?;
+            for panel in &PANELS {
+                app.add_capability(panel_capability(panel))?;
+            }
             let path = app.path().app_data_dir()?.join("playtime.json");
             app.manage(Mutex::new(Meter::load(path)));
             let handle = app.handle().clone();
@@ -552,6 +659,9 @@ pub fn run() {
             check_game,
             close_game,
             answer_notice,
+            open_panel,
+            close_panel,
+            open_overlay,
             sign_event,
             nip44_encrypt,
             nip44_decrypt,
@@ -593,5 +703,41 @@ mod tests {
         );
         assert!(origin_pattern("http://blockstr.io").is_err());
         assert!(origin_pattern("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn only_keyhall_panels_over_a_game_parse_as_panels() {
+        let game = game_label("https://blockstr.io");
+        let notice = format!("{game}-notice-3");
+        let (panel, id) = panel_of(&notice).unwrap();
+        assert_eq!((panel.kind, id), ("notice", "3"));
+        assert_eq!(
+            panel_of(&format!("{game}-overlay-0")).unwrap().0.kind,
+            "overlay"
+        );
+        for label in [&game, "main", "game-x-dms-1", "notice-1", "x-y-overlay-0"] {
+            assert!(panel_of(label).is_none(), "{label}");
+        }
+    }
+
+    #[test]
+    fn each_panel_kind_gets_only_its_own_commands() {
+        assert_eq!(PANELS[0].permissions, ["allow-answer-notice"]);
+        assert_eq!(PANELS[1].permissions, ["allow-close-panel"]);
+        for panel in &PANELS {
+            assert!(
+                panel
+                    .permissions
+                    .iter()
+                    .all(|p| !GAME_PERMISSIONS.contains(p))
+            );
+        }
+    }
+
+    #[test]
+    fn the_launcher_opens_overlays_but_never_notices() {
+        assert!(launcher_panel("overlay").is_ok());
+        assert!(launcher_panel("notice").is_err());
+        assert!(launcher_panel("dms").is_err());
     }
 }

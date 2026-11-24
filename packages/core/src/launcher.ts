@@ -64,6 +64,7 @@ export type LauncherEvent =
   | { type: "observed"; coordinate: string; kinds: number[] }
   | { type: "closed"; coordinate: string }
   | { type: "key-field"; coordinate: string }
+  | { type: "panel"; coordinate: string; kind: keyof typeof panels }
   | { type: "update-ready"; version: string };
 
 type KeyCommand = "generate_key" | "import_key";
@@ -79,7 +80,9 @@ export interface LauncherDeps extends PresenceDeps {
   saveRelays(relays: Relay[]): void;
   probeRelay(url: string): Promise<boolean>;
   fetchLastUpdated(game: Game): Promise<number>;
-  openGame(game: Game): Promise<string>;
+  openGame(game: Game, hotkey: string): Promise<string>;
+  openPanel(label: string, kind: string, props: object): void;
+  saveHotkey(hotkey: string): void;
   checkGame(label: string): void;
   closeGame(label: string): void;
   listen(send: (event: LauncherEvent) => void): () => void;
@@ -112,6 +115,7 @@ export interface Stored {
   relays: Relay[];
   budget: BudgetSettings;
   friendsOpen: boolean;
+  hotkey: string;
 }
 
 export interface Fetched {
@@ -142,6 +146,7 @@ export interface LauncherContext {
   view?: View;
   friends?: Friend[];
   friendsOpen: boolean;
+  hotkey: string;
   profile?: Friend;
   profileEvent?: Event;
   profileError: string;
@@ -181,6 +186,7 @@ type Events =
   | { type: "updated"; coordinate: string; time: number }
   | { type: "view"; view: View }
   | { type: "friends.toggle" }
+  | { type: "hotkey.set"; hotkey: string }
   | { type: "presence.mode"; mode: PresenceMode }
   | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
   | { type: "friend-status"; pubkey: string; at: number; status?: Status }
@@ -296,6 +302,16 @@ export const running = (context: LauncherContext) =>
     return game ? [{ game, since }] : [];
   });
 
+/** What each kind of launcher-opened in-game window shows, by game. */
+export const panels = {
+  overlay: (context: LauncherContext, coordinate: string) => ({
+    game: findGame(context, coordinate)?.name,
+    since: running(context).find((r) => r.game.coordinate === coordinate)?.since,
+    hotkey: context.hotkey,
+    friends: playing(context),
+  }),
+};
+
 export function monthSplit(context: LauncherContext, month: string) {
   const games = Object.values(context.listings);
   const paid = context.budget.paid[month] ?? {};
@@ -368,10 +384,10 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           }
         })();
       }),
-      openGame: fromCallback<Events, Game>(({ input, sendBack }) => {
+      openGame: fromCallback<Events, { game: Game; hotkey: string }>(({ input, sendBack }) => {
         void deps
-          .openGame(input)
-          .then((label) => sendBack({ type: "opened", coordinate: input.coordinate, label }));
+          .openGame(input.game, input.hotkey)
+          .then((label) => sendBack({ type: "opened", coordinate: input.game.coordinate, label }));
       }),
       fetchFriends: fromPromise<Friend[], string>(({ input }) => deps.fetchFriends(input)),
       fetchProfileEvent: fromPromise<Event | undefined, string>(({ input }) =>
@@ -477,6 +493,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       windows: {},
       statuses: {},
       friendsOpen: stored.friendsOpen ?? true,
+      hotkey: stored.hotkey ?? "Shift+Tab",
       presence: stored.presence ?? DEFAULT_PRESENCE,
       circle: stored.circle,
       budget: stored.budget ?? { sats: 0, paid: {} },
@@ -635,6 +652,19 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           ({ context }) => deps.saveFriendsOpen(context.friendsOpen),
         ],
       },
+      "hotkey.set": {
+        actions: [
+          assign({ hotkey: ({ event }) => event.hotkey }),
+          ({ event }) => deps.saveHotkey(event.hotkey),
+        ],
+      },
+      panel: {
+        actions: ({ context, event }) => {
+          const label = context.windows[event.coordinate];
+          if (label)
+            deps.openPanel(label, event.kind, panels[event.kind](context, event.coordinate));
+        },
+      },
       "presence.mode": {
         actions: [
           assign({ presence: ({ context, event }) => ({ ...context.presence, mode: event.mode }) }),
@@ -673,8 +703,8 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       },
       play: {
         guard: ({ context }) => context.npub !== null,
-        actions: enqueueActions(({ enqueue, event }) =>
-          enqueue.spawnChild("openGame", { input: event.game }),
+        actions: enqueueActions(({ context, enqueue, event }) =>
+          enqueue.spawnChild("openGame", { input: { game: event.game, hotkey: context.hotkey } }),
         ),
       },
       opened: {

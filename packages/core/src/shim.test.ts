@@ -27,7 +27,7 @@ beforeEach(() => {
   (win as unknown as { WebSocket: unknown }).WebSocket = FakeSocket;
   delete (win as Partial<Win>).nostr;
   document.body.innerHTML = "";
-  new Function(shimScript())();
+  new Function(shimScript("Shift+Tab"))();
 });
 
 describe("shim", () => {
@@ -70,6 +70,19 @@ describe("shim", () => {
       ["nostr_observe", { kinds: [64, 0] }],
       ["nostr_observe", { kinds: [30762] }],
     ]);
+  });
+
+  it("asks for the overlay on its hotkey and keeps that key from the game", () => {
+    const game = vi.fn();
+    document.addEventListener("keydown", game);
+    const press = (init: KeyboardEventInit) =>
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...init }));
+    press({ key: "Tab", shiftKey: true });
+    press({ key: "Tab" });
+    expect(invoke.mock.calls.filter(([cmd]) => cmd === "open_overlay")).toEqual([
+      ["open_overlay", {}],
+    ]);
+    expect(game).toHaveBeenCalledOnce();
   });
 
   const keyFields = () => invoke.mock.calls.filter(([cmd]) => cmd === "nostr_key_field");
