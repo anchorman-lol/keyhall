@@ -1,6 +1,15 @@
 import type { Event } from "nostr-tools/pure";
 import { describe, expect, it, vi } from "vitest";
-import { addMessage, inboxRelays, sendDm, watchDms, type DmDeps, type Message } from "./dm";
+import {
+  addMessage,
+  groupThread,
+  inboxRelays,
+  sendDm,
+  unread,
+  watchDms,
+  type DmDeps,
+  type Message,
+} from "./dm";
 
 const me = "a".repeat(64);
 const friend = "b".repeat(64);
@@ -57,11 +66,34 @@ describe("watchDms", () => {
       (m) => received.push(m),
     );
     await vi.waitFor(() => expect(received).toEqual([message("dm", 1)]));
-    expect(subscribe).toHaveBeenCalledWith({ kinds: [1059], "#p": [me] }, expect.any(Function), [
-      "wss://mine.example",
-    ]);
+    expect(subscribe).toHaveBeenCalledWith(
+      { kinds: [1059], "#p": [me] },
+      expect.any(Function),
+      ["wss://mine.example"],
+      expect.any(Function),
+    );
     stop();
     expect(close).toHaveBeenCalled();
+  });
+
+  it("reports ready once the stored wraps are unwrapped", async () => {
+    let unwrapped = false;
+    const ready = vi.fn(() => expect(unwrapped).toBe(true));
+    watchDms(
+      {
+        subscribe: (_filter, onEvent, _relays, onEose) => {
+          onEvent(wrap("dm"));
+          onEose?.();
+          return () => {};
+        },
+        inboxRelays: async () => [],
+        unwrap: async () => ((unwrapped = true), message("dm", 1)),
+      },
+      me,
+      () => {},
+      ready,
+    );
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce());
   });
 });
 
@@ -69,5 +101,39 @@ describe("addMessage", () => {
   it("keeps a thread in time order without duplicates", () => {
     const thread = [message("b", 2), message("a", 1), message("b", 2)].reduce(addMessage, []);
     expect(thread.map((m) => m.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("unread", () => {
+  it("counts the friend's messages after the read mark", () => {
+    const theirs = (id: string, at: number) => ({ ...message(id, at), from: friend, to: me });
+    expect(unread([theirs("a", 1), message("b", 2), theirs("c", 3)], me, 1)).toBe(1);
+  });
+});
+
+describe("groupThread", () => {
+  const at = (day: number, hour: number, minute = 0) =>
+    new Date(2026, 10, day, hour, minute).getTime() / 1000;
+  const from = (sender: string, id: string, time: number) => ({
+    ...message(id, time),
+    from: sender,
+  });
+
+  it("groups runs by sender, splits after a pause and marks new days", () => {
+    const groups = groupThread([
+      from(friend, "a", at(23, 22)),
+      from(friend, "b", at(23, 22, 3)),
+      from(me, "c", at(23, 22, 4)),
+      from(me, "d", at(23, 23)),
+      from(me, "e", at(24, 9)),
+    ]);
+    expect(
+      groups.map((g) => [g.from === me, g.newDay, g.messages.map((m) => m.id).join("")]),
+    ).toEqual([
+      [false, true, "ab"],
+      [true, false, "c"],
+      [true, false, "d"],
+      [true, true, "e"],
+    ]);
   });
 });

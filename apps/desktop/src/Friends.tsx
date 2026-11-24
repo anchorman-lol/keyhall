@@ -3,7 +3,7 @@ import { friendName, type Friend } from "@keyhall/core/presence";
 import { Popover, PopoverContent, PopoverTrigger } from "@keyhall/ui/components/popover";
 import { CaretRightIcon, ChatCircleIcon, CheckIcon, EyeIcon } from "@phosphor-icons/react";
 import { useState, type ReactNode } from "react";
-import { DmDialog } from "./DmDialog.tsx";
+import { UnreadBadge, useChat } from "./Chat.tsx";
 import { Launcher } from "./launcher.ts";
 import { GameIcon } from "./Library.tsx";
 import { MODES } from "./PresenceSettings.tsx";
@@ -34,15 +34,22 @@ export function Avatar({
   );
 }
 
-function MessageButton({ friend, onClick }: { friend: Friend; onClick(): void }) {
+function MessageButton({ friend }: { friend: Friend }) {
+  const chat = useChat();
+  if (!chat) return null;
   return (
-    <button
-      aria-label={`Message ${friendName(friend)}`}
-      onClick={onClick}
-      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-white/[0.06] hover:text-foreground focus-visible:opacity-100"
-    >
-      <ChatCircleIcon className="size-4" />
-    </button>
+    <span className="grid size-7 shrink-0 place-items-center *:col-start-1 *:row-start-1">
+      <button
+        aria-label={`Message ${friendName(friend)}`}
+        onClick={() => chat.openChat(friend.pubkey)}
+        className="peer grid size-7 place-items-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-white/[0.06] hover:text-foreground focus-visible:opacity-100"
+      >
+        <ChatCircleIcon className="size-4" />
+      </button>
+      <span className="pointer-events-none group-hover:opacity-0 peer-focus-visible:opacity-0">
+        <UnreadBadge count={chat.unreadOf(friend.pubkey)} />
+      </span>
+    </span>
   );
 }
 
@@ -51,7 +58,8 @@ export function FriendsColumn() {
   const { send } = Launcher.useActorRef();
   const { friends, presence } = context;
   const [open, setOpen] = useState(false);
-  const [chat, setChat] = useState<Friend>();
+  const chat = useChat();
+  const unread = (friends ?? []).reduce((n, f) => n + (chat?.unreadOf(f.pubkey) ?? 0), 0);
   const active = playing(context);
   const idle = (friends ?? []).filter((f) => !active.some((p) => p.friend === f));
   const heading = "flex h-7 items-center px-2 text-[12px] font-medium text-muted-foreground";
@@ -62,6 +70,9 @@ export function FriendsColumn() {
         {active.length > 0 && (
           <span className="text-[12px] text-muted-foreground">{active.length} playing</span>
         )}
+        <span className="-mr-1.5 ml-auto grid w-7 place-items-center">
+          <UnreadBadge count={unread} />
+        </span>
       </header>
       <div className="grid min-h-0 flex-1 content-start gap-5 overflow-y-auto px-2.5 pt-3 pb-3">
         {!friends ? (
@@ -76,7 +87,11 @@ export function FriendsColumn() {
                 {active.map(({ friend, status }) => {
                   const game = status.coordinate && findGame(context, status.coordinate);
                   return (
-                    <div key={friend.pubkey} className="group flex items-center pr-1">
+                    <div
+                      key={friend.pubkey}
+                      onDoubleClick={() => chat?.openChat(friend.pubkey)}
+                      className="group flex items-center pr-1"
+                    >
                       <button
                         disabled={!game}
                         onClick={() => game && send({ type: "select", game })}
@@ -95,7 +110,7 @@ export function FriendsColumn() {
                           </span>
                         </span>
                       </button>
-                      <MessageButton friend={friend} onClick={() => setChat(friend)} />
+                      <MessageButton friend={friend} />
                     </div>
                   );
                 })}
@@ -104,19 +119,22 @@ export function FriendsColumn() {
             <section>
               <h3 className={heading}>Follows</h3>
               {idle.map((friend) => (
-                <div key={friend.pubkey} className="group flex h-9 items-center gap-3 pr-1 pl-2">
+                <div
+                  key={friend.pubkey}
+                  onDoubleClick={() => chat?.openChat(friend.pubkey)}
+                  className="group flex h-9 items-center gap-3 rounded-lg pr-1 pl-2 select-none hover:bg-white/[0.03]"
+                >
                   <Avatar friend={friend} className="size-6" />
                   <span className="flex-1 truncate text-[13px] text-foreground/80">
                     {friendName(friend)}
                   </span>
-                  <MessageButton friend={friend} onClick={() => setChat(friend)} />
+                  <MessageButton friend={friend} />
                 </div>
               ))}
             </section>
           </>
         )}
       </div>
-      <DmDialog friend={chat} onClose={() => setChat(undefined)} />
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger className="flex shrink-0 items-center gap-2 border-t border-white/[0.06] px-5 py-3 text-left text-[12px] text-muted-foreground hover:text-foreground data-popup-open:text-foreground">
           <EyeIcon className="size-4" />

@@ -7,6 +7,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useChat } from "./Chat.tsx";
 import { Launcher } from "./launcher.ts";
 import { UpdateNotice } from "./UpdateNotice.tsx";
 
@@ -33,8 +34,10 @@ const CONTROLS = [
 ];
 
 export function TitleBar() {
-  const { current, view, friendsOpen } = Launcher.useSelector((s) => s.context);
+  const { current, view, friendsOpen, friends } = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
+  const chat = useChat();
+  const unread = !!chat && !!friends?.some((f) => chat.unreadOf(f.pubkey));
   const crumb =
     "rounded-md px-1.5 py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
   return (
@@ -78,9 +81,12 @@ export function TitleBar() {
         aria-pressed={friendsOpen}
         title={friendsOpen ? "Hide friends" : "Show friends"}
         onClick={() => send({ type: "friends.toggle" })}
-        className={`grid size-7 place-items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60 ${friendsOpen ? "bg-white/[0.075] text-primary" : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"}`}
+        className={`relative grid size-7 place-items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60 ${friendsOpen ? "bg-white/[0.075] text-primary" : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"}`}
       >
         <UsersIcon weight={friendsOpen ? "fill" : "regular"} className="size-4" />
+        {unread && !friendsOpen && (
+          <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary ring-2 ring-sidebar" />
+        )}
       </button>
       <div className="flex self-stretch">
         {CONTROLS.map(({ label, Icon, run, hover }) => (

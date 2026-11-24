@@ -1,7 +1,8 @@
 import { NO_FILTERS } from "@keyhall/core/filters";
-import { findGame, type ShimCall } from "@keyhall/core/launcher";
+import { findGame, pubkeyOf, type ShimCall } from "@keyhall/core/launcher";
 import { useEffect, useRef, useState } from "react";
 import { BudgetPage } from "./BudgetPage.tsx";
+import { ChatPanel, ChatProvider } from "./Chat.tsx";
 import { FriendsColumn } from "./Friends.tsx";
 import { GamePage } from "./GamePage.tsx";
 import { SignOut } from "./KeyDialog.tsx";
@@ -40,6 +41,17 @@ function Settings() {
 }
 
 export function App() {
+  const me = Launcher.useSelector((s) => pubkeyOf(s.context));
+  return me ? (
+    <ChatProvider key={me} me={me}>
+      <Shell />
+    </ChatProvider>
+  ) : (
+    <Shell />
+  );
+}
+
+function Shell() {
   const { current, view, friendsOpen } = Launcher.useSelector((s) => s.context);
   const [filters, setFilters] = useState(NO_FILTERS);
   return (
@@ -48,7 +60,7 @@ export function App() {
     >
       <TitleBar />
       <Nav />
-      <div className="min-h-0 min-w-0">
+      <div className="relative min-h-0 min-w-0">
         {view === "budget" ? (
           <div className="h-full overflow-y-auto px-8 pt-6 pb-10">
             <BudgetPage />
@@ -60,6 +72,7 @@ export function App() {
         ) : (
           <Library filters={filters} setFilters={setFilters} />
         )}
+        <ChatPanel />
       </div>
       {friendsOpen && <FriendsColumn />}
       <SignRequest />

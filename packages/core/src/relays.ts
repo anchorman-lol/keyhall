@@ -104,8 +104,13 @@ export const fetchProfileEvent = async (pubkey: string) =>
 const or = (relays: string[] | undefined, use: Use) =>
   relays?.length ? relays : relaysFor(settings, use);
 
-export const subscribe = (filter: Filter, onevent: (event: Event) => void, relays?: string[]) => {
-  const sub = pool.subscribeMany(or(relays, "social"), filter, { onevent });
+export const subscribe = (
+  filter: Filter,
+  onevent: (event: Event) => void,
+  relays?: string[],
+  oneose?: () => void,
+) => {
+  const sub = pool.subscribeMany(or(relays, "social"), filter, { onevent, oneose });
   return () => sub.close();
 };
 
