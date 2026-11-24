@@ -81,7 +81,7 @@ export function CustomDialog({
             {(
               [
                 [false, GlobeIcon, "Web game"],
-                [true, AppWindowIcon, "App on this computer"],
+                [true, AppWindowIcon, "Application"],
               ] as const
             ).map(([isApp, Icon, label]) => (
               <button
@@ -100,7 +100,7 @@ export function CustomDialog({
         )}
         {app ? (
           <div className="flex items-center gap-2 text-sm">
-            <span className="font-medium">App</span>
+            <span className="font-medium">Application</span>
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {fields.url || "None chosen"}
             </span>

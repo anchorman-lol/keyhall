@@ -5,7 +5,7 @@ const web: CustomGame = { id: "a", name: "Chess", url: "https://chess.example", 
 const app: CustomGame = { id: "b", name: "Celeste", url: "/Applications/Celeste.app", addedAt: 6 };
 
 describe("custom games", () => {
-  it("adds a web game or an app on this computer, and edits one in place", () => {
+  it("adds a web game or an application, and edits one in place", () => {
     const added = saveCustom([], { name: " Chess ", url: "https://chess.example" }, 5);
     expect(added).toEqual([
       { id: expect.any(String), name: "Chess", url: "https://chess.example", addedAt: 5 },
@@ -27,7 +27,7 @@ describe("custom games", () => {
     expect(saveCustom([], { name: "", url: web.url }, 1)).toBe("Give it a name.");
     for (const url of ["http://x.io", "chess.example", "Games/doom.exe"])
       expect(saveCustom([], { name: "X", url }, 1)).toBe(
-        "Enter an https:// address or choose an app.",
+        "Enter an https:// address or choose an application.",
       );
     expect(saveCustom([], { name: "X", url: web.url, lud16: "nope" }, 1)).toBe(
       "A lightning address looks like name@domain.com.",

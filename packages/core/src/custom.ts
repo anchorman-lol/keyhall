@@ -19,7 +19,7 @@ export function saveCustom(list: CustomGame[], input: CustomInput, now: number) 
   const url = input.url.trim();
   const lud16 = input.lud16?.trim();
   if (!name) return "Give it a name.";
-  if (!https(url) && !isApp(url)) return "Enter an https:// address or choose an app.";
+  if (!https(url) && !isApp(url)) return "Enter an https:// address or choose an application.";
   if (lud16 && !LUD16.test(lud16)) return "A lightning address looks like name@domain.com.";
   const old = list.find((c) => c.id === input.id);
   const saved = {
