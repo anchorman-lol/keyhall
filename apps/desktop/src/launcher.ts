@@ -1,4 +1,4 @@
-import { launcherMachine, type ShimCall, type SignRequest } from "@keyhall/core/launcher";
+import { launcherMachine, type ShimCall } from "@keyhall/core/launcher";
 import {
   fetchFriends,
   fetchGames,
@@ -66,7 +66,6 @@ const machine = launcherMachine(
       }),
     checkGame: (label) => void invoke("check_game", { label }),
     closeGame: (label) => void invoke("close_game", { label }),
-    answer: (id, allow) => void invoke("answer_sign_request", { id, allow }),
     listen: (send) => {
       const subscriptions = [
         listen<ShimCall>("shim", ({ payload }) => send({ type: "shim", call: payload })),
@@ -75,9 +74,6 @@ const machine = launcherMachine(
         ),
         listen<{ coordinate: string }>("closed", ({ payload }) =>
           send({ type: "closed", ...payload }),
-        ),
-        listen<SignRequest>("sign-request", ({ payload }) =>
-          send({ type: "sign-request", request: payload }),
         ),
         listen<string>("key-field", ({ payload }) =>
           send({ type: "key-field", coordinate: payload }),

@@ -8,7 +8,7 @@ fn main() {
             "open_game",
             "check_game",
             "close_game",
-            "answer_sign_request",
+            "answer_notice",
             "sign_event",
             "nip44_encrypt",
             "nip44_decrypt",

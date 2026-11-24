@@ -14,7 +14,7 @@ use nostr::prelude::{Event, Keys, PublicKey, ToBech32};
 use serde_json::json;
 use tauri::ipc::CapabilityBuilder;
 use tauri::{
-    AppHandle, Emitter, Manager, State, UserAttentionType, WebviewUrl, WebviewWindow,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_updater::UpdaterExt;
@@ -121,6 +121,16 @@ impl Launcher {
     fn wallet(&self) -> Result<NostrWalletConnectUri, String> {
         self.stored_wallet()?
             .ok_or_else(|| "Connect a wallet first".into())
+    }
+
+    fn answer(&self, id: &str, allow: bool) {
+        let pending = id
+            .parse()
+            .ok()
+            .and_then(|id| self.pending.lock().unwrap().remove(&id));
+        if let Some(reply) = pending {
+            let _ = reply.send(allow);
+        }
     }
 
     fn game(&self, window: &WebviewWindow) -> Result<Game, String> {
@@ -253,6 +263,11 @@ fn open_game(
     let coordinate_closed = coordinate.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::Destroyed = event {
+            for (label, notice) in app.webview_windows() {
+                if label.starts_with(&format!("{closed}-notice-")) {
+                    let _ = notice.destroy();
+                }
+            }
             app.state::<Mutex<Meter>>()
                 .lock()
                 .unwrap()
@@ -290,11 +305,55 @@ fn close_game(app: AppHandle, state: State<Launcher>, label: String) -> Result<(
     }
 }
 
-#[tauri::command]
-fn answer_sign_request(state: State<Launcher>, id: u64, allow: bool) {
-    if let Some(reply) = state.pending.lock().unwrap().remove(&id) {
-        let _ = reply.send(allow);
+/// Shows a Keyhall notice in its own window over the game, so the game can't script it.
+fn show_notice(game: &WebviewWindow, id: &str, notice: serde_json::Value) -> Result<(), String> {
+    let label = format!("{}-notice-{id}", game.label());
+    if game.get_webview_window(&label).is_some() {
+        return Ok(());
     }
+    let scale = game.scale_factor().map_err(|e| e.to_string())?;
+    let at: LogicalPosition<f64> = game
+        .inner_position()
+        .map_err(|e| e.to_string())?
+        .to_logical(scale);
+    let size: LogicalSize<f64> = game
+        .inner_size()
+        .map_err(|e| e.to_string())?
+        .to_logical(scale);
+    let width = 420.0;
+    let height = if notice["kind"].is_null() { 200.0 } else { 280.0 };
+    let window = WebviewWindowBuilder::new(game, &label, WebviewUrl::App("index.html".into()))
+        .initialization_script(format!("window.notice = {notice};"))
+        .parent(game)
+        .map_err(|e| e.to_string())?
+        .decorations(false)
+        .resizable(false)
+        .inner_size(width, height)
+        .position(
+            at.x + (size.width - width) / 2.0,
+            at.y + (size.height - height) / 2.0,
+        )
+        .build()
+        .map_err(|e| e.to_string())?;
+    let app = game.app_handle().clone();
+    let id = id.to_string();
+    window.on_window_event(move |event| {
+        if let WindowEvent::Destroyed = event {
+            app.state::<Launcher>().answer(&id, false);
+        }
+    });
+    let _ = game.set_focus();
+    window.set_focus().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn answer_notice(window: WebviewWindow, state: State<Launcher>, allow: bool) -> Result<(), String> {
+    let (_, id) = window
+        .label()
+        .rsplit_once("-notice-")
+        .ok_or("not a notice")?;
+    state.answer(id, allow);
+    window.destroy().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -346,17 +405,11 @@ async fn nostr_sign_event(
         let id = state.next_request.fetch_add(1, Ordering::Relaxed);
         let (reply, answer) = oneshot::channel();
         state.pending.lock().unwrap().insert(id, reply);
-        let main = app
-            .get_webview_window("main")
-            .ok_or("The launcher window is closed")?;
-        let _ = main.unminimize();
-        let _ = main.set_focus();
-        let _ = main.request_user_attention(Some(UserAttentionType::Critical));
-        main.emit(
-            "sign-request",
-            json!({"id": id, "game": game.name, "coordinate": game.coordinate, "kind": event.kind, "content": event.content}),
-        )
-        .map_err(|e| e.to_string())?;
+        show_notice(
+            &window,
+            &id.to_string(),
+            json!({"game": game.name, "kind": event.kind, "content": event.content}),
+        )?;
         if !answer.await.unwrap_or(false) {
             return Err("The player declined to sign".into());
         }
@@ -394,11 +447,8 @@ fn nostr_key_field(
     state: State<Launcher>,
 ) -> Result<(), String> {
     let game = state.game(&window)?;
-    let main = app
-        .get_webview_window("main")
-        .ok_or("The launcher window is closed")?;
-    let _ = main.set_focus();
-    main.emit("key-field", game.coordinate)
+    show_notice(&window, "key", json!({"game": game.name}))?;
+    app.emit_to("main", "key-field", game.coordinate)
         .map_err(|e| e.to_string())
 }
 
@@ -489,7 +539,7 @@ pub fn run() {
             open_game,
             check_game,
             close_game,
-            answer_sign_request,
+            answer_notice,
             sign_event,
             nip44_encrypt,
             nip44_decrypt,

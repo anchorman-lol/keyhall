@@ -59,19 +59,10 @@ export interface ShimCall {
   verified?: boolean;
 }
 
-export interface SignRequest {
-  id: number;
-  game: string;
-  coordinate: string;
-  kind: number;
-  content: string;
-}
-
 export type LauncherEvent =
   | { type: "shim"; call: ShimCall }
   | { type: "observed"; coordinate: string; kinds: number[] }
   | { type: "closed"; coordinate: string }
-  | { type: "sign-request"; request: SignRequest }
   | { type: "key-field"; coordinate: string }
   | { type: "update-ready"; version: string };
 
@@ -91,7 +82,6 @@ export interface LauncherDeps extends PresenceDeps {
   openGame(game: Game): Promise<string>;
   checkGame(label: string): void;
   closeGame(label: string): void;
-  answer(id: number, allow: boolean): void;
   listen(send: (event: LauncherEvent) => void): () => void;
   saveObserved(observed: Record<string, Observation>): void;
   fetchLabels(curators: string[]): Promise<Label[]>;
@@ -145,11 +135,9 @@ export interface LauncherContext {
   calls: ShimCall[];
   observed: Record<string, Observation>;
   windows: Record<string, string>;
-  requests: SignRequest[];
   labels: Label[];
   labelled: string[];
   labelError: string;
-  keyWarnings: string[];
   current?: Game;
   view?: View;
   friends?: Friend[];
@@ -181,7 +169,6 @@ type Events =
   | { type: "opened"; coordinate: string; label: string }
   | { type: "check"; game: Game }
   | { type: "quit"; game: Game }
-  | { type: "answer"; allow: boolean }
   | { type: "source.toggle"; id: string }
   | { type: "source.add"; input: string }
   | { type: "source.remove"; id: string }
@@ -205,7 +192,6 @@ type Events =
   | { type: "zap.finished" }
   | { type: "labels.loaded"; labels: Label[] }
   | { type: "label.publish"; game: Game; methods: string[]; depth: Depth | undefined }
-  | { type: "warning.dismiss" }
   | { type: "profile.edit" }
   | { type: "profile.save"; fields: ProfileFields }
   | { type: "profile.cancel" }
@@ -489,7 +475,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       calls: [],
       observed: stored.observed ?? {},
       windows: {},
-      requests: [],
       statuses: {},
       friendsOpen: stored.friendsOpen ?? true,
       presence: stored.presence ?? DEFAULT_PRESENCE,
@@ -502,7 +487,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       labels: [],
       labelled: [],
       labelError: "",
-      keyWarnings: [],
       profileError: "",
     },
     invoke: { src: "listen" },
@@ -612,17 +596,12 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       },
       "key-field": {
         actions: [
-          assign(({ context, event }) => ({
-            observed: record(context, event.coordinate, (o) => ({ ...o, keyField: true })),
-            keyWarnings: context.keyWarnings.includes(event.coordinate)
-              ? context.keyWarnings
-              : [...context.keyWarnings, event.coordinate],
-          })),
+          assign({
+            observed: ({ context, event }) =>
+              record(context, event.coordinate, (o) => ({ ...o, keyField: true })),
+          }),
           "saveObserved",
         ],
-      },
-      "warning.dismiss": {
-        actions: assign({ keyWarnings: ({ context }) => context.keyWarnings.slice(1) }),
       },
       "update-ready": { actions: assign({ update: ({ event }) => event.version }) },
       "update.restart": {
@@ -753,9 +732,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           "saveObserved",
         ],
       },
-      "sign-request": {
-        actions: assign({ requests: ({ context, event }) => [...context.requests, event.request] }),
-      },
     },
     states: {
       key: {
@@ -819,8 +795,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
                     keyError: "",
                     calls: [],
                     observed: {},
-                    requests: [],
-                    keyWarnings: [],
                     friends: undefined,
                     profile: undefined,
                     profileEvent: undefined,
@@ -1080,26 +1054,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
                 ],
               },
               "zap.finished": "idle",
-            },
-          },
-        },
-      },
-      signer: {
-        initial: "idle",
-        states: {
-          idle: {
-            always: { guard: ({ context }) => context.requests.length > 0, target: "asking" },
-          },
-          asking: {
-            always: { guard: ({ context }) => !context.requests.length, target: "idle" },
-            on: {
-              answer: {
-                target: "idle",
-                actions: [
-                  ({ context, event }) => deps.answer(context.requests[0]!.id, event.allow),
-                  assign({ requests: ({ context }) => context.requests.slice(1) }),
-                ],
-              },
             },
           },
         },

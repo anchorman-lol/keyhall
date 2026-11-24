@@ -91,7 +91,6 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     openGame: async () => "game-1",
     checkGame: vi.fn(),
     closeGame: vi.fn(),
-    answer: vi.fn(),
     listen: (send) => {
       emit = send;
       return () => {};
@@ -366,27 +365,6 @@ describe("update", () => {
 });
 
 describe("signer", () => {
-  it("asks about one sign request at a time and passes the answer on", async () => {
-    const { actor, deps, emit } = start();
-    const request = (id: number) => ({
-      id,
-      game: "Blockstr",
-      coordinate: game.coordinate,
-      kind: 1,
-      content: "",
-    });
-    emit({ type: "sign-request", request: request(1) });
-    emit({ type: "sign-request", request: request(2) });
-    expect(actor.getSnapshot().matches({ signer: "asking" })).toBe(true);
-    expect(actor.getSnapshot().context.requests[0]?.id).toBe(1);
-    actor.send({ type: "answer", allow: true });
-    expect(deps.answer).toHaveBeenCalledWith(1, true);
-    expect(actor.getSnapshot().context.requests[0]?.id).toBe(2);
-    actor.send({ type: "answer", allow: false });
-    expect(deps.answer).toHaveBeenCalledWith(2, false);
-    expect(actor.getSnapshot().matches({ signer: "idle" })).toBe(true);
-  });
-
   it("verifies signatures against the player's own key", async () => {
     const { actor, emit } = start({ keyStatus: async () => npub });
     await waitFor(actor, (s) => s.matches({ key: "ready" }));
@@ -464,17 +442,14 @@ describe("verification", () => {
     ]);
   });
 
-  it("warns about a key-shaped field once per game and records it", () => {
+  it("records a key-shaped field", () => {
     const { actor, deps, emit } = start();
     emit({ type: "key-field", coordinate: game.coordinate });
     emit({ type: "key-field", coordinate: game.coordinate });
     const { context } = actor.getSnapshot();
-    expect(context.keyWarnings).toEqual([game.coordinate]);
     expect(context.observed[game.coordinate]).toEqual({ kinds: [], signer: false, keyField: true });
     expect(deps.saveObserved).toHaveBeenLastCalledWith(context.observed);
     expect(signInOf(context, game).conflicts).toEqual([{ from: "window", value: "nsec" }]);
-    actor.send({ type: "warning.dismiss" });
-    expect(actor.getSnapshot().context.keyWarnings).toEqual([]);
   });
 
   it("lets a curator label a game, publishing only once confirmed", async () => {

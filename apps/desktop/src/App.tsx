@@ -5,14 +5,12 @@ import { BudgetPage } from "./BudgetPage.tsx";
 import { FriendsColumn } from "./Friends.tsx";
 import { GamePage } from "./GamePage.tsx";
 import { SignOut } from "./KeyDialog.tsx";
-import { KeyWarning } from "./KeyWarning.tsx";
 import { Launcher } from "./launcher.ts";
 import { Library } from "./Library.tsx";
 import { Nav } from "./Nav.tsx";
 import { PresenceSettings } from "./PresenceSettings.tsx";
 import { RelaySettings } from "./Relays.tsx";
 import { SignerLog } from "./SignerLog.tsx";
-import { SignRequest } from "./SignRequest.tsx";
 import { TitleBar } from "./TitleBar.tsx";
 
 function Settings() {
@@ -62,8 +60,6 @@ export function App() {
         )}
       </div>
       {friendsOpen && <FriendsColumn />}
-      <SignRequest />
-      <KeyWarning />
     </div>
   );
 }
