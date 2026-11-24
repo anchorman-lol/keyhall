@@ -1,7 +1,9 @@
+import type { DmDeps } from "@keyhall/core/dm";
 import { launcherMachine, type ShimCall } from "@keyhall/core/launcher";
 import {
   fetchFriends,
   fetchGames,
+  fetchInboxRelays,
   fetchLabels,
   fetchLastUpdated,
   fetchListings,
@@ -41,6 +43,14 @@ export function useNow() {
   }, []);
   return now;
 }
+
+export const dms = {
+  wrap: (to, text) => invoke("dm_wrap", { to, text }),
+  unwrap: (wrap) => invoke("dm_unwrap", { wrap }),
+  inboxRelays: fetchInboxRelays,
+  publish,
+  subscribe,
+} satisfies DmDeps & { subscribe: typeof subscribe };
 
 const relays = loadRelays(JSON.parse(localStorage.getItem("relays") ?? "null"));
 setRelays(relays);

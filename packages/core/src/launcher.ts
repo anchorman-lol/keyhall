@@ -672,6 +672,7 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         ],
       },
       play: {
+        guard: ({ context }) => context.npub !== null,
         actions: enqueueActions(({ enqueue, event }) =>
           enqueue.spawnChild("openGame", { input: event.game }),
         ),

@@ -12,6 +12,8 @@ fn main() {
             "sign_event",
             "nip44_encrypt",
             "nip44_decrypt",
+            "dm_wrap",
+            "dm_unwrap",
             "wallet_status",
             "connect_wallet",
             "wallet_pay_request",

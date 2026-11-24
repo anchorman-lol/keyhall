@@ -39,10 +39,16 @@ const signed = (key = secret) =>
 const game = {
   coordinate: "31990:abc:blockstr",
   name: "Blockstr",
+  url: "https://blockstr.io",
   createdAt: 100,
   signIn: "signer",
 } as Game;
-const spam = { coordinate: "31990:def:spam", name: "Spam", createdAt: 100 } as Game;
+const spam = {
+  coordinate: "31990:def:spam",
+  name: "Spam",
+  url: "https://spam.io",
+  createdAt: 100,
+} as Game;
 const curatorSecret = generateSecretKey();
 const curatorKey = getPublicKey(curatorSecret);
 const listOf = (ref: ListRef, games: Game[]): CuratorList => ({
@@ -203,6 +209,24 @@ describe("key", () => {
     );
   });
 
+  it("opens no game window until a key is stored", async () => {
+    const openGame = vi.fn(async () => "game-1");
+    const { actor } = start({
+      keyStatus: async () => null,
+      saveKey: async () => npub,
+      openGame,
+    });
+    await waitFor(actor, (s) => s.matches({ key: "setup" }));
+    actor.send({ type: "play", game });
+    expect(openGame).not.toHaveBeenCalled();
+
+    actor.send({ type: "key.create" });
+    await waitFor(actor, (s) => s.matches({ key: "ready" }));
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => !!s.context.windows[game.coordinate]);
+    expect(openGame).toHaveBeenCalledOnce();
+  });
+
   it("tells an unreadable keychain apart from a missing key", async () => {
     const { actor } = start({
       keyStatus: () => Promise.reject("Keyhall can't read the keychain: denied"),
@@ -322,7 +346,8 @@ describe("library", () => {
   });
 
   it("opens a game window, then tests sign-in in it and quits it", async () => {
-    const { actor, deps } = start();
+    const { actor, deps } = start({ keyStatus: async () => npub });
+    await waitFor(actor, (s) => s.matches({ key: "ready" }));
     actor.send({ type: "play", game });
     await waitFor(actor, (s) => s.context.windows[game.coordinate] === "game-1");
     actor.send({ type: "check", game });
@@ -336,7 +361,8 @@ describe("library", () => {
       { coordinate: game.coordinate, start: 10, end: 20 },
       { coordinate: game.coordinate, start: 50, end: 60 },
     ]);
-    const { actor } = start({ sessions });
+    const { actor } = start({ sessions, keyStatus: async () => npub });
+    await waitFor(actor, (s) => s.matches({ key: "ready" }));
     actor.send({ type: "select", game });
     await waitFor(actor, (s) => s.context.sessions.length > 0);
     expect(running(actor.getSnapshot().context)).toEqual([]);
@@ -350,7 +376,8 @@ describe("library", () => {
 describe("update", () => {
   it("offers a restart once an update is installed, but not while a game is open", async () => {
     const restart = vi.fn();
-    const { actor, emit } = start({ restart });
+    const { actor, emit } = start({ restart, keyStatus: async () => npub });
+    await waitFor(actor, (s) => s.matches({ key: "ready" }));
     expect(actor.getSnapshot().context.update).toBeUndefined();
     emit({ type: "update-ready", version: "2026.1123.0" });
     expect(actor.getSnapshot().context.update).toBe("2026.1123.0");

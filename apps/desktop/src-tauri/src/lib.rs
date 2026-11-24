@@ -1,3 +1,4 @@
+mod dm;
 mod meter;
 mod signer;
 mod wallet;
@@ -380,6 +381,17 @@ async fn nip44_decrypt(app: AppHandle, pubkey: String, text: String) -> Result<S
 }
 
 #[tauri::command]
+async fn dm_wrap(app: AppHandle, to: String, text: String) -> Result<[Event; 2], String> {
+    let keys = keychain_task(app, Launcher::keys).await?;
+    dm::wrap(&keys, peer(&to)?, &text)
+}
+
+#[tauri::command]
+async fn dm_unwrap(app: AppHandle, wrap: Event) -> Result<dm::Message, String> {
+    dm::unwrap(&keychain_task(app, Launcher::keys).await?, &wrap)
+}
+
+#[tauri::command]
 async fn nostr_get_public_key(app: AppHandle, window: WebviewWindow) -> Result<String, String> {
     let game = app.state::<Launcher>().game(&window)?;
     let pubkey = keychain_task(app.clone(), Launcher::keys)
@@ -543,6 +555,8 @@ pub fn run() {
             sign_event,
             nip44_encrypt,
             nip44_decrypt,
+            dm_wrap,
+            dm_unwrap,
             wallet_status,
             connect_wallet,
             wallet_pay_request,

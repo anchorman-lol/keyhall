@@ -28,6 +28,7 @@ Once installed, Keyhall updates itself: it checks the latest release on launch a
 - Keeps your key in the macOS keychain. Create one or import an nsec; it stays in the Rust process. Sign out (Settings) deletes it.
 - Edit profile, in the menu under your name at the bottom of the rail, edits your name, picture, about and lightning address (`lud16`, where zaps reach you). It starts from your latest kind 0 on your relays, keeps every field and tag it doesn't show, and publishes a new kind 0 to your presence relays. Only the launcher signs kind 0: games can't, even if you'd allow it.
 - Friends are your NIP-02 follow list (read only). The friends column on the right shows what they're playing, with each game's icon, and game cards show which friends are in that game.
+- Messages: double-click a friend (or use the chat button) to open your NIP-17 DMs with them in a tabbed chat panel that stays open while you browse, with unread counts on friends, so any NIP-17 client with your key shows the same messages. Rust seals and gift-wraps each message (kinds 14, 13 and 1059), one copy to the friend's DM relays (kind 10050) and one to yours, falling back to your presence relays; games can't sign these kinds.
 - Presence: while a game window is open, Keyhall publishes a NIP-38 status (`30315`, `d=game`, “Playing Nochess”, expiring after 3 hours) when the window opens and clears it when it closes. Set Public, Friends only (the default) or Hidden for all games, and override it per game.
 - Meters play time: every minute a game window is open counts, idle included. Rust checkpoints the sessions to the app's data folder every 30 seconds, so they survive restarts. Nothing about play time is published.
 - Monthly budget: set an amount and connect a wallet over Nostr Wallet Connect (NIP-47). Its connection string goes into the keychain, and only Rust signs and decrypts the wallet messages. After a month ends, the Monthly budget page shows its split and pays it only once you confirm, as anonymous zaps (a throwaway key signs each zap request) to each game's lightning address. Games under 15 minutes don't count, games without an address and shares under 100 sats go to the others, and 1% stays back for fees.
@@ -63,7 +64,7 @@ Each game window gets a capability added at runtime, scoped to that window and t
 
 A pnpm workspace:
 
-- `apps/desktop`: the Tauri 2 app, a React UI and the Rust host (`src-tauri`: keychain, signer, game windows, play-time meter, NWC wallet).
+- `apps/desktop`: the Tauri 2 app, a React UI and the Rust host (`src-tauri`: keychain, signer, game windows, play-time meter, NWC wallet, NIP-17 DMs).
 - `packages/core`: listing and curator-list parsing (`curation.ts`), the games catalog and the picks events (`catalog.ts`, published by `scripts/picks.ts` to the default relays), curator labels and badge verdicts (`labels.ts`), source settings and their union (`sources.ts`), relay settings and per-use routing (`relaySettings.ts`), badges, depth classification, the `window.nostr` shim, relay queries, presence, the budget split, zaps and the launcher's XState machine (key setup, library, game windows, signing approvals, friends, presence, budget payments).
 - `packages/ui`: shadcn components (Base UI, Phosphor icons) and the Tailwind theme.
 
@@ -86,6 +87,7 @@ Unsigned builds change their code signature on every rebuild, so macOS asks for 
 - Sync sources as encrypted NIP-78 app data.
 - A private friends list (NIP-51 follow set) as an alternative to all follows, and keeping the circle key in the keychain instead of local storage.
 - Monthly budget: rolling small shares over to the next month, excluding games, credit-me-publicly zaps and syncing play time between devices.
+- NIP-42 AUTH, so DMs also load from relays that serve kind 1059 only to its recipient.
 - `nip44` in the shim, per-kind scopes from the listing's `k` tags, guest keys per game.
 - Native games on desktop through a built-in NIP-46 bunker, Windows and Linux key stores, and mobile.
 - Switching or removing the stored key.

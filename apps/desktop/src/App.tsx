@@ -1,7 +1,8 @@
 import { NO_FILTERS } from "@keyhall/core/filters";
-import { findGame, type ShimCall } from "@keyhall/core/launcher";
+import { findGame, pubkeyOf, type ShimCall } from "@keyhall/core/launcher";
 import { useEffect, useRef, useState } from "react";
 import { BudgetPage } from "./BudgetPage.tsx";
+import { ChatPanel, ChatProvider } from "./Chat.tsx";
 import { FriendsColumn } from "./Friends.tsx";
 import { GamePage } from "./GamePage.tsx";
 import { SignOut } from "./KeyDialog.tsx";
@@ -22,22 +23,37 @@ function Settings() {
   }, [context.view]);
   return (
     <div className="h-full overflow-y-auto px-8 pt-6 pb-10">
-      <PresenceSettings />
-      <div ref={relays} className="mt-10 border-t pt-8">
-        <RelaySettings />
+      <div className="mx-auto grid max-w-3xl gap-8 [&>*+*]:border-t [&>*+*]:pt-8">
+        <PresenceSettings />
+        <div ref={relays}>
+          <RelaySettings />
+        </div>
+        <section>
+          <h2 className="mb-3 text-xl font-semibold">Signer activity</h2>
+          {context.calls.length ? (
+            <SignerLog calls={context.calls.slice(-20).reverse()} name={name} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing signed since Keyhall started.</p>
+          )}
+        </section>
+        <SignOut />
       </div>
-      <h2 className="mt-10 mb-3 font-semibold">Signer activity</h2>
-      {context.calls.length ? (
-        <SignerLog calls={context.calls.slice(-20).reverse()} name={name} />
-      ) : (
-        <p className="text-sm text-muted-foreground">Nothing signed since Keyhall started.</p>
-      )}
-      <SignOut />
     </div>
   );
 }
 
 export function App() {
+  const me = Launcher.useSelector((s) => pubkeyOf(s.context));
+  return me ? (
+    <ChatProvider key={me} me={me}>
+      <Shell />
+    </ChatProvider>
+  ) : (
+    <Shell />
+  );
+}
+
+function Shell() {
   const { current, view, friendsOpen } = Launcher.useSelector((s) => s.context);
   const [filters, setFilters] = useState(NO_FILTERS);
   return (
@@ -46,7 +62,7 @@ export function App() {
     >
       <TitleBar />
       <Nav />
-      <div className="min-h-0 min-w-0">
+      <div className="relative min-h-0 min-w-0">
         {view === "budget" ? (
           <div className="h-full overflow-y-auto px-8 pt-6 pb-10">
             <BudgetPage />
@@ -58,6 +74,7 @@ export function App() {
         ) : (
           <Library filters={filters} setFilters={setFilters} />
         )}
+        <ChatPanel />
       </div>
       {friendsOpen && <FriendsColumn />}
     </div>

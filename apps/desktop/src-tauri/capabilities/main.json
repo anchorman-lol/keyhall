@@ -20,6 +20,8 @@
     "allow-sign-event",
     "allow-nip44-encrypt",
     "allow-nip44-decrypt",
+    "allow-dm-wrap",
+    "allow-dm-unwrap",
     "allow-wallet-status",
     "allow-connect-wallet",
     "allow-wallet-pay-request",

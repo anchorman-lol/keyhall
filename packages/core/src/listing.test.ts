@@ -46,6 +46,36 @@ describe("parseListings", () => {
     ]);
   });
 
+  describe("one game per website", () => {
+    const copy = (over: Parameters<typeof listing>[0]) =>
+      listing({ ...over, pubkey: "c".repeat(64) });
+    const ownRepo = [["a", `30617:${"c".repeat(64)}:blockstr`, "", "repo"]];
+
+    it("keeps the repo owner's listing even when another author's copy is newer", () => {
+      const owner = listing({
+        pubkey: "c".repeat(64),
+        tags: [["d", "blockstr"], ["t", "games"], ...ownRepo],
+      });
+      const newerCopy = listing({ created_at: 1_790_000_100 });
+      const games = parseListings([newerCopy, owner]);
+      expect(games.map((g) => g.pubkey)).toEqual(["c".repeat(64)]);
+    });
+
+    it("keeps the newest listing when no author owns a repo", () => {
+      const older = copy({ created_at: 1 });
+      const newer = listing({ created_at: 2 });
+      expect(parseListings([older, newer]).map((g) => g.pubkey)).toEqual(["a".repeat(64)]);
+    });
+
+    it("treats a trailing slash as the same website", () => {
+      const slash = listing({
+        content: JSON.stringify({ website: "https://blockstr.io/" }),
+        created_at: 5,
+      });
+      expect(parseListings([copy({ created_at: 1 }), slash])).toHaveLength(1);
+    });
+  });
+
   it("pays the listing's lud16 as the listing's author", () => {
     const game = listing({
       content: JSON.stringify({ website: "https://x.io", lud16: "dev@x.io" }),

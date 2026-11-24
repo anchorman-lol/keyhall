@@ -1,5 +1,5 @@
 import { PICKS_REF, refId, type ListRef } from "./curation";
-import type { Game } from "./listing";
+import { gameKey, type Game } from "./listing";
 
 export interface CuratorSetting {
   ref: ListRef;
@@ -77,9 +77,9 @@ export function union(sources: Source[], games: Record<string, Game[]>): Entry[]
   for (const { id, enabled } of sources) {
     if (!enabled) continue;
     for (const game of games[id] ?? []) {
-      const entry = entries.get(game.coordinate);
+      const entry = entries.get(gameKey(game));
       if (entry) entry.from.push(id);
-      else entries.set(game.coordinate, { game, from: [id] });
+      else entries.set(gameKey(game), { game, from: [id] });
     }
   }
   return [...entries.values()].sort((a, b) => a.game.name.localeCompare(b.game.name));
