@@ -2457,6 +2457,8 @@ dependencies = [
  "keyring",
  "nostr",
  "objc2-app-kit",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",

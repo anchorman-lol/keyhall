@@ -1,4 +1,5 @@
 mod dm;
+mod lnurl;
 mod meter;
 mod signer;
 mod wallet;
@@ -210,6 +211,11 @@ async fn wallet_pay_request(app: AppHandle, invoice: String) -> Result<serde_jso
 #[tauri::command]
 async fn wallet_pay_result(app: AppHandle, reply: Event) -> Result<String, String> {
     keychain_task(app, move |l| wallet::pay_result(&l.wallet()?, &reply)).await
+}
+
+#[tauri::command]
+async fn lnurl_fetch(url: String) -> Result<serde_json::Value, String> {
+    lnurl::fetch(&url).await
 }
 
 #[tauri::command]
@@ -511,6 +517,7 @@ pub fn run() {
             connect_wallet,
             wallet_pay_request,
             wallet_pay_result,
+            lnurl_fetch,
             play_sessions,
             nostr_get_public_key,
             nostr_sign_event,
