@@ -4,23 +4,22 @@ import type { Game } from "./listing";
 import { payments, payOverNwc, zapInvoice } from "./zap";
 
 const invoice = (sats: number) => `lnbc${sats * 10}n1${"q".repeat(60)}`;
-const json = (body: unknown) => new Response(JSON.stringify(body));
 
 function lnurl(over: Record<string, unknown> = {}) {
   const calls: URL[] = [];
-  const fetch = vi.fn(async (input: string | URL) => {
+  const fetch = vi.fn(async (input: string) => {
     const url = new URL(input);
     calls.push(url);
     if (url.pathname === "/.well-known/lnurlp/dev")
-      return json({
+      return {
         callback: "https://x.io/cb",
         minSendable: 1000,
         maxSendable: 1e9,
         allowsNostr: true,
         nostrPubkey: "f".repeat(64),
         ...over,
-      });
-    return json({ pr: invoice(Number(url.searchParams.get("amount")) / 1000) });
+      };
+    return { pr: invoice(Number(url.searchParams.get("amount")) / 1000) };
   });
   return { fetch, calls };
 }
@@ -71,10 +70,10 @@ describe("zapInvoice", () => {
   });
 
   it("refuses an invoice for a different amount", async () => {
-    const fetch = vi.fn(async (input: string | URL) =>
-      String(input).includes("lnurlp")
-        ? json({ callback: "https://x.io/cb", minSendable: 1000, maxSendable: 1e9 })
-        : json({ pr: invoice(5000) }),
+    const fetch = vi.fn(async (input: string) =>
+      input.includes("lnurlp")
+        ? { callback: "https://x.io/cb", minSendable: 1000, maxSendable: 1e9 }
+        : { pr: invoice(5000) },
     );
     await expect(zapInvoice(fetch, part, "", [])).rejects.toThrow("asked for 5000 sats");
   });
@@ -82,7 +81,7 @@ describe("zapInvoice", () => {
   it("reports the LNURL server's errors and limits", async () => {
     const tooSmall = lnurl({ minSendable: 1_000_000 });
     await expect(zapInvoice(tooSmall.fetch, part, "", [])).rejects.toThrow("between 1000");
-    const failing = vi.fn(async () => json({ status: "ERROR", reason: "no such user" }));
+    const failing = vi.fn(async () => ({ status: "ERROR", reason: "no such user" }));
     await expect(zapInvoice(failing, part, "", [])).rejects.toThrow("no such user");
   });
 });

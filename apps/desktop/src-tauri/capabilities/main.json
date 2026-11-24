@@ -27,6 +27,7 @@
     "allow-connect-wallet",
     "allow-wallet-pay-request",
     "allow-wallet-pay-result",
+    "allow-lnurl-fetch",
     "allow-play-sessions",
     "allow-sign-label",
     "allow-restart-to-update"

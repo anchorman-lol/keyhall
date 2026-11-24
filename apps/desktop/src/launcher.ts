@@ -122,6 +122,7 @@ const machine = launcherMachine(
       zap(payment, comment, {
         request: (invoice) => invoke("wallet_pay_request", { invoice }),
         result: (reply) => invoke("wallet_pay_result", { reply }),
+        lnurl: (url) => invoke("lnurl_fetch", { url }),
       }),
     saveBudget: (budget) => localStorage.setItem("budget", JSON.stringify(budget)),
     restart: () => void invoke("restart_to_update"),
