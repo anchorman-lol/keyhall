@@ -1,4 +1,5 @@
 import {
+  KEYHALL,
   monthKey,
   monthName,
   payouts,
@@ -21,8 +22,8 @@ import {
   DialogTrigger,
 } from "@keyhall/ui/components/dialog";
 import { Input } from "@keyhall/ui/components/input";
-import { ChartPieSliceIcon, LightningIcon, TimerIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import { ChartPieSliceIcon, KeyholeIcon, LightningIcon, TimerIcon } from "@phosphor-icons/react";
+import { useState, type ReactNode } from "react";
 import { Launcher } from "./launcher.ts";
 import { Cover } from "./Library.tsx";
 
@@ -72,6 +73,24 @@ function Settings() {
           <p className="text-xs text-muted-foreground">
             1% stays back as a reserve for routing fees.
           </p>
+          <label className="text-sm font-medium" htmlFor="share">
+            Keyhall share
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              id="share"
+              type="range"
+              min={0}
+              max={20}
+              className="w-36 accent-primary"
+              value={budget.share}
+              onChange={(e) => send({ type: "budget.set", share: Number(e.target.value) })}
+            />
+            <span className="text-sm tabular-nums">{budget.share}%</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Supports Keyhall's development, taken off the top. 0% is fine too.
+          </p>
         </div>
         <div className="grid content-start gap-3">
           <label className="text-sm font-medium" htmlFor="nwc">
@@ -117,33 +136,56 @@ function Settings() {
   );
 }
 
-function Row({ share, shade, note }: { share: Share; shade?: string; note: string }) {
-  const game = Launcher.useSelector((s) => findGame(s.context, share.coordinate));
-  const name = game?.name ?? share.coordinate.split(":")[2] ?? share.coordinate;
+function Line(props: {
+  cover: ReactNode;
+  name: string;
+  shade?: string;
+  time?: string;
+  percent: number;
+  note: string;
+  sats: number;
+}) {
   return (
     <div className="grid grid-cols-[28px_minmax(0,1.3fr)_80px_56px_minmax(0,2fr)_64px] items-center gap-3 border-t py-2 text-sm">
-      {game ? (
-        <Cover game={game} className="size-7 rounded-md text-xs" />
-      ) : (
-        <span className="size-7 rounded-md bg-muted" />
-      )}
+      {props.cover}
       <span className="flex items-center gap-2 truncate font-medium">
-        <i className={`size-2 shrink-0 rounded-full ${shade ?? "bg-muted-foreground/30"}`} />
-        {name}
+        <i className={`size-2 shrink-0 rounded-full ${props.shade ?? "bg-muted-foreground/30"}`} />
+        {props.name}
       </span>
-      <span className="text-right tabular-nums">{duration(share.seconds)}</span>
+      <span className="text-right tabular-nums">{props.time}</span>
       <span className="text-right text-muted-foreground tabular-nums">
-        {share.percent ? `${(share.percent * 100).toFixed(1)}%` : "—"}
+        {props.percent ? `${(props.percent * 100).toFixed(1)}%` : "—"}
       </span>
-      <span className="truncate text-muted-foreground" title={note}>
-        {note}
+      <span className="truncate text-muted-foreground" title={props.note}>
+        {props.note}
       </span>
       <span
-        className={`text-right tabular-nums ${share.sats ? "font-semibold" : "text-muted-foreground"}`}
+        className={`text-right tabular-nums ${props.sats ? "font-semibold" : "text-muted-foreground"}`}
       >
-        {sats(share.sats)}
+        {sats(props.sats)}
       </span>
     </div>
+  );
+}
+
+function Row({ share, shade, note }: { share: Share; shade?: string; note: string }) {
+  const game = Launcher.useSelector((s) => findGame(s.context, share.coordinate));
+  return (
+    <Line
+      cover={
+        game ? (
+          <Cover game={game} className="size-7 rounded-md text-xs" />
+        ) : (
+          <span className="size-7 rounded-md bg-muted" />
+        )
+      }
+      name={game?.name ?? share.coordinate.split(":")[2] ?? share.coordinate}
+      shade={shade}
+      time={duration(share.seconds)}
+      percent={share.percent}
+      note={note}
+      sats={share.sats}
+    />
   );
 }
 
@@ -151,16 +193,19 @@ function Split({ month, running }: { month: string; running?: boolean }) {
   const context = Launcher.useSelector((s) => s.context);
   const paying = Launcher.useSelector((s) => s.matches({ budget: "paying" }));
   const { send } = Launcher.useActorRef();
-  const { shares, reserve, paid, payments } = monthSplit(context, month);
+  const { shares, reserve, keyhall, share, paid, payments } = monthSplit(context, month);
   const paidShares = shares.filter((s) => s.sats);
   const total = paidShares.reduce((a, s) => a + s.sats, 0);
   const due = payments.reduce((a, p) => a + p.sats, 0);
-  const how = (coordinate: string) => {
-    const payTo = findGame(context, coordinate)?.payTo ?? [];
-    const keys = payTo.map((r) => `${coordinate} ${r.pubkey}`);
+  const status = (keys: string[]) => {
     const error = keys.map((k) => context.payErrors[k]).find(Boolean);
     if (error) return `Failed: ${error}`;
     if (keys.every((k) => k in paid)) return "Paid";
+  };
+  const how = (coordinate: string) => {
+    const payTo = findGame(context, coordinate)?.payTo ?? [];
+    const done = status(payTo.map((r) => `${coordinate} ${r.pubkey}`));
+    if (done) return done;
     return payTo.length > 1
       ? `zap split · ${payTo.length} developers`
       : (payTo[0]?.lud16 ?? "zap to the developer's lightning address");
@@ -193,6 +238,7 @@ function Split({ month, running }: { month: string; running?: boolean }) {
                     style={{ flex: s.sats }}
                   />
                 ))}
+                {keyhall > 0 && <span className="bg-foreground/60" style={{ flex: keyhall }} />}
               </div>
             )}
             {shares.map((share) => {
@@ -206,10 +252,28 @@ function Split({ month, running }: { month: string; running?: boolean }) {
                 />
               );
             })}
+            {share > 0 && total > 0 && (
+              <Line
+                cover={
+                  <span className="grid size-7 place-items-center rounded-md bg-muted">
+                    <KeyholeIcon weight="fill" />
+                  </span>
+                }
+                name="Keyhall share"
+                shade={keyhall ? "bg-foreground/60" : undefined}
+                percent={share / 100}
+                note={
+                  keyhall
+                    ? (status([KEYHALL.key]) ?? "Supports Keyhall's development")
+                    : "Under the 100-sat minimum payout · its share goes to the games"
+                }
+                sats={keyhall}
+              />
+            )}
             <div className="flex items-center justify-between gap-4 border-t pt-3 text-sm text-muted-foreground">
               <span>
-                Total {sats(total)} sats to {games(paidShares.length)} + {sats(reserve)} sats fee
-                reserve
+                Total {sats(total)} sats to {games(paidShares.length)}
+                {keyhall > 0 && ` + ${sats(keyhall)} to Keyhall`} + {sats(reserve)} sats fee reserve
               </span>
               {!running && due > 0 && (
                 <Dialog>
