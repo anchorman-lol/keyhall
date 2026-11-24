@@ -11,6 +11,7 @@ import type { Label } from "./labels";
 import {
   curatorName,
   depthOf,
+  exampleToast,
   findGame,
   isCurator,
   signInOf,
@@ -583,12 +584,12 @@ describe("overlay", () => {
       (s) => s.matches({ friends: "ready" }) && !!findGame(s.context, game.coordinate),
     );
     mock.deliver(finalizeEvent(publicStatus(game, now()), sam));
-    emit({ type: "panel", coordinate: game.coordinate, kind: "overlay" });
+    emit({ type: "panel", coordinate: game.coordinate, kind: "session" });
     expect(openPanel).not.toHaveBeenCalled();
     actor.send({ type: "play", game });
     await waitFor(actor, (s) => s.context.sessions.length > 0);
-    emit({ type: "panel", coordinate: game.coordinate, kind: "overlay" });
-    expect(openPanel).toHaveBeenCalledWith("game-1", "overlay", {
+    emit({ type: "panel", coordinate: game.coordinate, kind: "session" });
+    expect(openPanel).toHaveBeenCalledWith("game-1", "session", "0", {
       game: "Blockstr",
       since: 100,
       hotkey: "Shift+Tab",
@@ -611,6 +612,27 @@ describe("overlay", () => {
     expect(saveHotkey).toHaveBeenCalledWith("Alt+K");
     actor.send({ type: "play", game });
     expect(openGame).toHaveBeenCalledWith(game, "Alt+K");
+  });
+
+  it("raises a toast over every open game, each stacking under its own id", async () => {
+    const openPanel = vi.fn();
+    const { actor } = start({ keyStatus: async () => npub, openPanel });
+    await waitFor(actor, (s) => s.matches({ key: "ready" }));
+    actor.send({ type: "toast", toast: exampleToast });
+    expect(openPanel).not.toHaveBeenCalled();
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => !!s.context.windows[game.coordinate]);
+    actor.send({ type: "toast", toast: exampleToast });
+    actor.send({ type: "toast", toast: { title: "Zap received", ms: 9000 } });
+    const [first, second] = openPanel.mock.calls;
+    expect(first).toEqual(["game-1", "toast", expect.any(String), { ms: 5000, ...exampleToast }]);
+    expect(second).toEqual([
+      "game-1",
+      "toast",
+      expect.any(String),
+      { ms: 9000, title: "Zap received" },
+    ]);
+    expect(first![2]).not.toBe(second![2]);
   });
 });
 

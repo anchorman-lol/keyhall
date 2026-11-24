@@ -81,7 +81,7 @@ export interface LauncherDeps extends PresenceDeps {
   probeRelay(url: string): Promise<boolean>;
   fetchLastUpdated(game: Game): Promise<number>;
   openGame(game: Game, hotkey: string): Promise<string>;
-  openPanel(label: string, kind: string, props: object): void;
+  openPanel(label: string, kind: string, id: string, props: object): void;
   saveHotkey(hotkey: string): void;
   checkGame(label: string): void;
   closeGame(label: string): void;
@@ -188,6 +188,7 @@ type Events =
   | { type: "view"; view: View }
   | { type: "friends.toggle" }
   | { type: "hotkey.set"; hotkey: string }
+  | { type: "toast"; toast: Toast }
   | { type: "presence.mode"; mode: PresenceMode }
   | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
   | { type: "friend-status"; pubkey: string; at: number; status?: Status }
@@ -305,12 +306,25 @@ export const running = (context: LauncherContext) =>
 
 /** What each kind of launcher-opened in-game window shows, by game. */
 export const panels = {
-  overlay: (context: LauncherContext, coordinate: string) => ({
+  session: (context: LauncherContext, coordinate: string) => ({
     game: findGame(context, coordinate)?.name,
     since: running(context).find((r) => r.game.coordinate === coordinate)?.since,
     hotkey: context.hotkey,
     friends: playing(context),
   }),
+};
+
+export interface Toast {
+  title: string;
+  body?: string;
+  ms?: number;
+}
+
+let toasts = 0;
+
+export const exampleToast: Toast = {
+  title: "Friend started playing",
+  body: "Sam is playing Jester",
 };
 
 export function monthSplit(context: LauncherContext, month: string) {
@@ -682,7 +696,14 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         actions: ({ context, event }) => {
           const label = context.windows[event.coordinate];
           if (label)
-            deps.openPanel(label, event.kind, panels[event.kind](context, event.coordinate));
+            deps.openPanel(label, event.kind, "0", panels[event.kind](context, event.coordinate));
+        },
+      },
+      toast: {
+        actions: ({ context, event }) => {
+          const id = String(++toasts);
+          for (const label of Object.values(context.windows))
+            deps.openPanel(label, "toast", id, { ms: 5000, ...event.toast });
         },
       },
       "presence.mode": {

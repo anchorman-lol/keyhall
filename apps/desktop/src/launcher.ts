@@ -74,7 +74,7 @@ const machine = launcherMachine(
         url: game.url,
         shim: shimScript(hotkey),
       }),
-    openPanel: (game, kind, props) => void invoke("open_panel", { game, kind, props }),
+    openPanel: (game, kind, id, props) => void invoke("open_panel", { game, kind, id, props }),
     saveHotkey: (hotkey) => localStorage.setItem("hotkey", JSON.stringify(hotkey)),
     checkGame: (label) => void invoke("check_game", { label }),
     closeGame: (label) => void invoke("close_game", { label }),

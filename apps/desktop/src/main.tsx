@@ -1,19 +1,18 @@
-import { StrictMode, type FC } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { Launcher } from "./launcher.ts";
-import { Notice } from "./Notice.tsx";
-import { Overlay } from "./Overlay.tsx";
+import { Overlay, Toasts, type Item } from "./Overlay.tsx";
 import "./app.css";
 
-const PANELS = { notice: Notice, overlay: Overlay } as Record<string, FC<object>>;
-const panel = (window as { panel?: { kind: string; props: object } }).panel;
-const Panel = panel && PANELS[panel.kind];
+const HOSTS = { overlay: Overlay, toasts: Toasts };
+const panel = (window as { panel?: { host: keyof typeof HOSTS; items: Item[] } }).panel;
+const Host = panel && HOSTS[panel.host];
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {Panel ? (
-      <Panel {...panel.props} />
+    {Host ? (
+      <Host items={panel.items} />
     ) : (
       <Launcher.Provider>
         <App />
