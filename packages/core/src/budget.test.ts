@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { monthKey, monthRange, payouts, playTime, previousMonth, split } from "./budget";
+import { KEYHALL, monthKey, monthRange, payouts, playTime, previousMonth, split } from "./budget";
 
 const minutes = (m: number) => m * 60;
 
@@ -16,7 +16,7 @@ describe("split", () => {
   };
 
   it("splits the budget by play time, as in the budget mockup", () => {
-    const { shares, reserve } = split(5000, played, (c) => c !== "parlour");
+    const { shares, reserve } = split(5000, played, (c) => c !== "parlour", 0);
     expect(reserve).toBe(50);
     expect(shares.map((s) => [s.coordinate, s.sats, s.reason])).toEqual([
       ["nochess", 2205, undefined],
@@ -34,13 +34,13 @@ describe("split", () => {
   });
 
   it("always pays out exactly the budget minus the reserve", () => {
-    const { shares, reserve } = split(1001, { a: 1000, b: 1000, c: 1000 }, () => true);
+    const { shares, reserve } = split(1001, { a: 1000, b: 1000, c: 1000 }, () => true, 0);
     expect(reserve).toBe(11);
     expect(shares.map((s) => s.sats)).toEqual([330, 330, 330]);
   });
 
   it("redistributes shares under the minimum payout", () => {
-    const { shares } = split(1000, { a: minutes(900), b: minutes(20) }, () => true);
+    const { shares } = split(1000, { a: minutes(900), b: minutes(20) }, () => true, 0);
     expect(shares.map((s) => [s.sats, s.reason])).toEqual([
       [990, undefined],
       [0, "minimum"],
@@ -48,11 +48,47 @@ describe("split", () => {
   });
 
   it("pays nothing without a budget or payable play time", () => {
-    expect(split(0, { a: minutes(60) }, () => true).shares[0]!.sats).toBe(0);
-    expect(split(5000, { a: minutes(60) }, () => false).shares[0]).toMatchObject({
-      sats: 0,
-      reason: "unpayable",
+    expect(split(0, { a: minutes(60) }, () => true, 5)).toMatchObject({ keyhall: 0 });
+    expect(split(5000, { a: minutes(60) }, () => false, 5)).toMatchObject({
+      shares: [{ sats: 0, reason: "unpayable" }],
+      keyhall: 0,
     });
+  });
+
+  it("takes the Keyhall share off the top before the games split", () => {
+    const { shares, reserve, keyhall } = split(5000, { a: 3000, b: 1000 }, () => true, 5);
+    expect([keyhall, reserve]).toEqual([250, 50]);
+    expect(shares.map((s) => s.sats)).toEqual([3525, 1175]);
+  });
+
+  it("takes no Keyhall share at 0%", () => {
+    expect(split(5000, { a: 3000 }, () => true, 0)).toMatchObject({
+      keyhall: 0,
+      shares: [{ sats: 4950 }],
+    });
+  });
+
+  it("gives a Keyhall share under the minimum payout back to the games", () => {
+    expect(split(1900, { a: 3000 }, () => true, 5)).toMatchObject({
+      keyhall: 0,
+      shares: [{ sats: 1881 }],
+    });
+  });
+
+  it("still sums to the budget with a Keyhall share", () => {
+    for (const [budget, percent] of [
+      [2017, 7],
+      [10_001, 13],
+      [3333, 20],
+    ] as const) {
+      const { shares, reserve, keyhall } = split(
+        budget,
+        { a: minutes(17), b: minutes(31), c: minutes(43) },
+        () => true,
+        percent,
+      );
+      expect(shares.reduce((a, s) => a + s.sats, keyhall + reserve)).toBe(budget);
+    }
   });
 });
 
@@ -81,11 +117,16 @@ describe("payouts", () => {
     expect(
       payouts({
         "2026-08": { "31990:a:x pk1": 300 },
-        "2026-09": { "31990:a:x pk1": 600, "31990:a:x pk2": 400, "31990:b:y pk3": 1000 },
+        "2026-09": {
+          "31990:a:x pk1": 600,
+          "31990:a:x pk2": 400,
+          "31990:b:y pk3": 1000,
+          [KEYHALL.key]: 100,
+        },
         "2026-10": {},
       }),
     ).toEqual([
-      { month: "2026-09", sats: 2000, games: 2 },
+      { month: "2026-09", sats: 2100, games: 2 },
       { month: "2026-08", sats: 300, games: 1 },
     ]);
   });

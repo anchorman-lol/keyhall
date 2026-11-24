@@ -56,6 +56,13 @@ describe("zapInvoice", () => {
     );
   });
 
+  it("zaps Keyhall without a game coordinate", async () => {
+    const { fetch, calls } = lnurl();
+    await zapInvoice(fetch, { ...part, coordinate: "" }, "", []);
+    const request = JSON.parse(calls[1]!.searchParams.get("nostr")!) as Event;
+    expect(request.tags.find(([name]) => name === "a")).toBeUndefined();
+  });
+
   it("falls back to a plain LNURL payment with a comment", async () => {
     const { fetch, calls } = lnurl({ allowsNostr: false, commentAllowed: 100 });
     await zapInvoice(fetch, part, "Keyhall budget", []);

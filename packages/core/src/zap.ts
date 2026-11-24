@@ -72,7 +72,7 @@ export async function zapInvoice(
         created_at: Math.floor(Date.now() / 1000),
         tags: [
           ["p", payment.pubkey],
-          ["a", payment.coordinate],
+          ...(payment.coordinate ? [["a", payment.coordinate]] : []),
           ["amount", String(msats)],
           ["relays", ...relays],
           ["anon"],
