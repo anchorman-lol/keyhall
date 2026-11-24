@@ -11,6 +11,7 @@ import type { Label } from "./labels";
 import {
   curatorName,
   depthOf,
+  exampleToast,
   findGame,
   isCurator,
   signInOf,
@@ -97,7 +98,8 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
     openGame: async () => "game-1",
     checkGame: vi.fn(),
     closeGame: vi.fn(),
-    answer: vi.fn(),
+    openPanel: vi.fn(),
+    saveHotkey: vi.fn(),
     listen: (send) => {
       emit = send;
       return () => {};
@@ -393,27 +395,6 @@ describe("update", () => {
 });
 
 describe("signer", () => {
-  it("asks about one sign request at a time and passes the answer on", async () => {
-    const { actor, deps, emit } = start();
-    const request = (id: number) => ({
-      id,
-      game: "Blockstr",
-      coordinate: game.coordinate,
-      kind: 1,
-      content: "",
-    });
-    emit({ type: "sign-request", request: request(1) });
-    emit({ type: "sign-request", request: request(2) });
-    expect(actor.getSnapshot().matches({ signer: "asking" })).toBe(true);
-    expect(actor.getSnapshot().context.requests[0]?.id).toBe(1);
-    actor.send({ type: "answer", allow: true });
-    expect(deps.answer).toHaveBeenCalledWith(1, true);
-    expect(actor.getSnapshot().context.requests[0]?.id).toBe(2);
-    actor.send({ type: "answer", allow: false });
-    expect(deps.answer).toHaveBeenCalledWith(2, false);
-    expect(actor.getSnapshot().matches({ signer: "idle" })).toBe(true);
-  });
-
   it("verifies signatures against the player's own key", async () => {
     const { actor, emit } = start({ keyStatus: async () => npub });
     await waitFor(actor, (s) => s.matches({ key: "ready" }));
@@ -491,17 +472,14 @@ describe("verification", () => {
     ]);
   });
 
-  it("warns about a key-shaped field once per game and records it", () => {
+  it("records a key-shaped field", () => {
     const { actor, deps, emit } = start();
     emit({ type: "key-field", coordinate: game.coordinate });
     emit({ type: "key-field", coordinate: game.coordinate });
     const { context } = actor.getSnapshot();
-    expect(context.keyWarnings).toEqual([game.coordinate]);
     expect(context.observed[game.coordinate]).toEqual({ kinds: [], signer: false, keyField: true });
     expect(deps.saveObserved).toHaveBeenLastCalledWith(context.observed);
     expect(signInOf(context, game).conflicts).toEqual([{ from: "window", value: "nsec" }]);
-    actor.send({ type: "warning.dismiss" });
-    expect(actor.getSnapshot().context.keyWarnings).toEqual([]);
   });
 
   it("lets a curator label a game, publishing only once confirmed", async () => {
@@ -587,6 +565,74 @@ describe("friends", () => {
     mock.deliver(finalizeEvent(publicStatus(game, now()), sam));
     mock.deliver(finalizeEvent(publicStatus(undefined, now() - 60), sam));
     expect(playing(actor.getSnapshot().context)).toHaveLength(1);
+  });
+});
+
+describe("overlay", () => {
+  it("opens over the game its hotkey was pressed in, with the session and friends playing", async () => {
+    const mock = relay();
+    const openPanel = vi.fn();
+    const { actor, emit } = start({
+      keyStatus: async () => npub,
+      fetchFriends: async () => friends,
+      sessions: async () => [{ coordinate: game.coordinate, start: 100, end: 160 }],
+      openPanel,
+      ...mock,
+    });
+    await waitFor(
+      actor,
+      (s) => s.matches({ friends: "ready" }) && !!findGame(s.context, game.coordinate),
+    );
+    mock.deliver(finalizeEvent(publicStatus(game, now()), sam));
+    emit({ type: "panel", coordinate: game.coordinate, kind: "session" });
+    expect(openPanel).not.toHaveBeenCalled();
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => s.context.sessions.length > 0);
+    emit({ type: "panel", coordinate: game.coordinate, kind: "session" });
+    expect(openPanel).toHaveBeenCalledWith("game-1", "session", "0", {
+      game: "Blockstr",
+      since: 100,
+      hotkey: "Shift+Tab",
+      friends: [
+        { friend: friends[0], status: expect.objectContaining({ content: "Playing Blockstr" }) },
+      ],
+    });
+  });
+
+  it("gives games opened after a hotkey change the new hotkey", async () => {
+    const openGame = vi.fn(async () => "game-1");
+    const saveHotkey = vi.fn();
+    const { actor } = start(
+      { keyStatus: async () => npub, openGame, saveHotkey },
+      { hotkey: "Ctrl+O" },
+    );
+    await waitFor(actor, (s) => s.matches({ key: "ready" }));
+    expect(actor.getSnapshot().context.hotkey).toBe("Ctrl+O");
+    actor.send({ type: "hotkey.set", hotkey: "Alt+K" });
+    expect(saveHotkey).toHaveBeenCalledWith("Alt+K");
+    actor.send({ type: "play", game });
+    expect(openGame).toHaveBeenCalledWith(game, "Alt+K");
+  });
+
+  it("raises a toast over every open game, each stacking under its own id", async () => {
+    const openPanel = vi.fn();
+    const { actor } = start({ keyStatus: async () => npub, openPanel });
+    await waitFor(actor, (s) => s.matches({ key: "ready" }));
+    actor.send({ type: "toast", toast: exampleToast });
+    expect(openPanel).not.toHaveBeenCalled();
+    actor.send({ type: "play", game });
+    await waitFor(actor, (s) => !!s.context.windows[game.coordinate]);
+    actor.send({ type: "toast", toast: exampleToast });
+    actor.send({ type: "toast", toast: { title: "Zap received", ms: 9000 } });
+    const [first, second] = openPanel.mock.calls;
+    expect(first).toEqual(["game-1", "toast", expect.any(String), { ms: 5000, ...exampleToast }]);
+    expect(second).toEqual([
+      "game-1",
+      "toast",
+      expect.any(String),
+      { ms: 9000, title: "Zap received" },
+    ]);
+    expect(first![2]).not.toBe(second![2]);
   });
 });
 

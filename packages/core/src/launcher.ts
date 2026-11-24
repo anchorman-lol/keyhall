@@ -59,20 +59,12 @@ export interface ShimCall {
   verified?: boolean;
 }
 
-export interface SignRequest {
-  id: number;
-  game: string;
-  coordinate: string;
-  kind: number;
-  content: string;
-}
-
 export type LauncherEvent =
   | { type: "shim"; call: ShimCall }
   | { type: "observed"; coordinate: string; kinds: number[] }
   | { type: "closed"; coordinate: string }
-  | { type: "sign-request"; request: SignRequest }
   | { type: "key-field"; coordinate: string }
+  | { type: "panel"; coordinate: string; kind: keyof typeof panels }
   | { type: "update-ready"; version: string };
 
 type KeyCommand = "generate_key" | "import_key";
@@ -88,10 +80,11 @@ export interface LauncherDeps extends PresenceDeps {
   saveRelays(relays: Relay[]): void;
   probeRelay(url: string): Promise<boolean>;
   fetchLastUpdated(game: Game): Promise<number>;
-  openGame(game: Game): Promise<string>;
+  openGame(game: Game, hotkey: string): Promise<string>;
+  openPanel(label: string, kind: string, id: string, props: object): void;
+  saveHotkey(hotkey: string): void;
   checkGame(label: string): void;
   closeGame(label: string): void;
-  answer(id: number, allow: boolean): void;
   listen(send: (event: LauncherEvent) => void): () => void;
   saveObserved(observed: Record<string, Observation>): void;
   fetchLabels(curators: string[]): Promise<Label[]>;
@@ -123,6 +116,7 @@ export interface Stored {
   relays: Relay[];
   budget: Partial<BudgetSettings>;
   friendsOpen: boolean;
+  hotkey: string;
 }
 
 export interface Fetched {
@@ -146,15 +140,14 @@ export interface LauncherContext {
   calls: ShimCall[];
   observed: Record<string, Observation>;
   windows: Record<string, string>;
-  requests: SignRequest[];
   labels: Label[];
   labelled: string[];
   labelError: string;
-  keyWarnings: string[];
   current?: Game;
   view?: View;
   friends?: Friend[];
   friendsOpen: boolean;
+  hotkey: string;
   profile?: Friend;
   profileEvent?: Event;
   profileError: string;
@@ -182,7 +175,6 @@ type Events =
   | { type: "opened"; coordinate: string; label: string }
   | { type: "check"; game: Game }
   | { type: "quit"; game: Game }
-  | { type: "answer"; allow: boolean }
   | { type: "source.toggle"; id: string }
   | { type: "source.add"; input: string }
   | { type: "source.remove"; id: string }
@@ -195,6 +187,8 @@ type Events =
   | { type: "updated"; coordinate: string; time: number }
   | { type: "view"; view: View }
   | { type: "friends.toggle" }
+  | { type: "hotkey.set"; hotkey: string }
+  | { type: "toast"; toast: Toast }
   | { type: "presence.mode"; mode: PresenceMode }
   | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
   | { type: "friend-status"; pubkey: string; at: number; status?: Status }
@@ -206,7 +200,6 @@ type Events =
   | { type: "zap.finished" }
   | { type: "labels.loaded"; labels: Label[] }
   | { type: "label.publish"; game: Game; methods: string[]; depth: Depth | undefined }
-  | { type: "warning.dismiss" }
   | { type: "profile.edit" }
   | { type: "profile.save"; fields: ProfileFields }
   | { type: "profile.cancel" }
@@ -311,6 +304,29 @@ export const running = (context: LauncherContext) =>
     return game ? [{ game, since }] : [];
   });
 
+/** What each kind of launcher-opened in-game window shows, by game. */
+export const panels = {
+  session: (context: LauncherContext, coordinate: string) => ({
+    game: findGame(context, coordinate)?.name,
+    since: running(context).find((r) => r.game.coordinate === coordinate)?.since,
+    hotkey: context.hotkey,
+    friends: playing(context),
+  }),
+};
+
+export interface Toast {
+  title: string;
+  body?: string;
+  ms?: number;
+}
+
+let toasts = 0;
+
+export const exampleToast: Toast = {
+  title: "Friend started playing",
+  body: "Sam is playing Jester",
+};
+
 export function monthSplit(context: LauncherContext, month: string) {
   const games = Object.values(context.listings);
   const paid = context.budget.paid[month] ?? {};
@@ -390,10 +406,10 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           }
         })();
       }),
-      openGame: fromCallback<Events, Game>(({ input, sendBack }) => {
+      openGame: fromCallback<Events, { game: Game; hotkey: string }>(({ input, sendBack }) => {
         void deps
-          .openGame(input)
-          .then((label) => sendBack({ type: "opened", coordinate: input.coordinate, label }));
+          .openGame(input.game, input.hotkey)
+          .then((label) => sendBack({ type: "opened", coordinate: input.game.coordinate, label }));
       }),
       fetchFriends: fromPromise<Friend[], string>(({ input }) => deps.fetchFriends(input)),
       fetchProfileEvent: fromPromise<Event | undefined, string>(({ input }) =>
@@ -497,9 +513,9 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       calls: [],
       observed: stored.observed ?? {},
       windows: {},
-      requests: [],
       statuses: {},
       friendsOpen: stored.friendsOpen ?? true,
+      hotkey: stored.hotkey ?? "Shift+Tab",
       presence: stored.presence ?? DEFAULT_PRESENCE,
       circle: stored.circle,
       budget: {
@@ -522,7 +538,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       labels: [],
       labelled: [],
       labelError: "",
-      keyWarnings: [],
       profileError: "",
     },
     invoke: { src: "listen" },
@@ -632,17 +647,12 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       },
       "key-field": {
         actions: [
-          assign(({ context, event }) => ({
-            observed: record(context, event.coordinate, (o) => ({ ...o, keyField: true })),
-            keyWarnings: context.keyWarnings.includes(event.coordinate)
-              ? context.keyWarnings
-              : [...context.keyWarnings, event.coordinate],
-          })),
+          assign({
+            observed: ({ context, event }) =>
+              record(context, event.coordinate, (o) => ({ ...o, keyField: true })),
+          }),
           "saveObserved",
         ],
-      },
-      "warning.dismiss": {
-        actions: assign({ keyWarnings: ({ context }) => context.keyWarnings.slice(1) }),
       },
       "update-ready": { actions: assign({ update: ({ event }) => event.version }) },
       "update.restart": {
@@ -675,6 +685,26 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           assign({ friendsOpen: ({ context }) => !context.friendsOpen }),
           ({ context }) => deps.saveFriendsOpen(context.friendsOpen),
         ],
+      },
+      "hotkey.set": {
+        actions: [
+          assign({ hotkey: ({ event }) => event.hotkey }),
+          ({ event }) => deps.saveHotkey(event.hotkey),
+        ],
+      },
+      panel: {
+        actions: ({ context, event }) => {
+          const label = context.windows[event.coordinate];
+          if (label)
+            deps.openPanel(label, event.kind, "0", panels[event.kind](context, event.coordinate));
+        },
+      },
+      toast: {
+        actions: ({ context, event }) => {
+          const id = String(++toasts);
+          for (const label of Object.values(context.windows))
+            deps.openPanel(label, "toast", id, { ms: 5000, ...event.toast });
+        },
       },
       "presence.mode": {
         actions: [
@@ -720,8 +750,8 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       },
       play: {
         guard: ({ context }) => context.npub !== null,
-        actions: enqueueActions(({ enqueue, event }) =>
-          enqueue.spawnChild("openGame", { input: event.game }),
+        actions: enqueueActions(({ context, enqueue, event }) =>
+          enqueue.spawnChild("openGame", { input: { game: event.game, hotkey: context.hotkey } }),
         ),
       },
       opened: {
@@ -779,9 +809,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
           }),
           "saveObserved",
         ],
-      },
-      "sign-request": {
-        actions: assign({ requests: ({ context, event }) => [...context.requests, event.request] }),
       },
     },
     states: {
@@ -846,8 +873,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
                     keyError: "",
                     calls: [],
                     observed: {},
-                    requests: [],
-                    keyWarnings: [],
                     friends: undefined,
                     profile: undefined,
                     profileEvent: undefined,
@@ -1107,26 +1132,6 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
                 ],
               },
               "zap.finished": "idle",
-            },
-          },
-        },
-      },
-      signer: {
-        initial: "idle",
-        states: {
-          idle: {
-            always: { guard: ({ context }) => context.requests.length > 0, target: "asking" },
-          },
-          asking: {
-            always: { guard: ({ context }) => !context.requests.length, target: "idle" },
-            on: {
-              answer: {
-                target: "idle",
-                actions: [
-                  ({ context, event }) => deps.answer(context.requests[0]!.id, event.allow),
-                  assign({ requests: ({ context }) => context.requests.slice(1) }),
-                ],
-              },
             },
           },
         },

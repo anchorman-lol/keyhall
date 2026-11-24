@@ -16,7 +16,7 @@ use nostr::prelude::{Event, Keys, PublicKey, ToBech32};
 use serde_json::json;
 use tauri::ipc::CapabilityBuilder;
 use tauri::{
-    AppHandle, Emitter, Manager, State, UserAttentionType, WebviewUrl, WebviewWindow,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_updater::UpdaterExt;
@@ -30,12 +30,90 @@ const KEYCHAIN_SERVICE: &str = "lol.anchorman.keyhall";
 const KEYCHAIN_ACCOUNT: &str = "nsec";
 const WALLET_ACCOUNT: &str = "nwc";
 const UPDATE_INTERVAL: Duration = Duration::from_secs(4 * 60 * 60);
-const GAME_PERMISSIONS: [&str; 4] = [
+const GAME_PERMISSIONS: [&str; 5] = [
     "allow-nostr-get-public-key",
     "allow-nostr-sign-event",
     "allow-nostr-observe",
     "allow-nostr-key-field",
+    "allow-open-overlay",
 ];
+
+/// A Keyhall window over a game, labelled `<game>-<name>`, that shows the panels hosted in it.
+#[derive(Debug, PartialEq)]
+struct Host {
+    name: &'static str,
+    /// The overlay fills the game and takes input; toasts sit in a corner and let clicks through.
+    interactive: bool,
+}
+
+const OVERLAY: Host = Host {
+    name: "overlay",
+    interactive: true,
+};
+const TOASTS: Host = Host {
+    name: "toasts",
+    interactive: false,
+};
+const HOSTS: [&Host; 2] = [&OVERLAY, &TOASTS];
+const TOAST_SIZE: (f64, f64) = (340.0, 260.0);
+
+/// A kind of Keyhall panel over a game.
+struct Panel {
+    kind: &'static str,
+    host: &'static Host,
+    permissions: &'static [&'static str],
+    /// Whether the launcher may open it with `open_panel`; notices open only from Rust.
+    launcher: bool,
+}
+
+const PANELS: [Panel; 3] = [
+    Panel {
+        kind: "notice",
+        host: &OVERLAY,
+        permissions: &["allow-answer-notice"],
+        launcher: false,
+    },
+    Panel {
+        kind: "session",
+        host: &OVERLAY,
+        permissions: &[],
+        launcher: true,
+    },
+    Panel {
+        kind: "toast",
+        host: &TOASTS,
+        permissions: &[],
+        launcher: true,
+    },
+];
+
+fn host_of(label: &str) -> Option<(&str, &'static Host)> {
+    let (game, name) = label.rsplit_once('-')?;
+    game.strip_prefix("game-").filter(|id| !id.contains('-'))?;
+    Some((game, HOSTS.into_iter().find(|h| h.name == name)?))
+}
+
+fn launcher_panel(kind: &str) -> Result<&'static Panel, String> {
+    PANELS
+        .iter()
+        .find(|p| p.kind == kind && p.launcher)
+        .ok_or_else(|| format!("The launcher can't open a {kind} panel"))
+}
+
+fn host_permissions(host: &Host) -> Vec<&'static str> {
+    let hosted = PANELS.iter().filter(|p| p.host == host);
+    std::iter::once("allow-close-panel")
+        .chain(hosted.flat_map(|p| p.permissions.iter().copied()))
+        .collect()
+}
+
+fn host_capability(host: &Host) -> CapabilityBuilder {
+    host_permissions(host).into_iter().fold(
+        CapabilityBuilder::new(format!("panel-{}", host.name))
+            .window(format!("game-*-{}", host.name)),
+        |c, p| c.permission(p),
+    )
+}
 
 #[derive(Clone)]
 struct Game {
@@ -49,7 +127,8 @@ struct Launcher {
     wallet: Mutex<Option<NostrWalletConnectUri>>,
     games: Mutex<HashMap<String, Game>>,
     approved: Mutex<HashSet<(String, u16)>>,
-    pending: Mutex<HashMap<u64, oneshot::Sender<bool>>>,
+    /// Sign requests waiting on a notice, with the label of the game that asked.
+    pending: Mutex<HashMap<u64, (String, oneshot::Sender<bool>)>>,
     next_request: AtomicU64,
 }
 
@@ -123,6 +202,17 @@ impl Launcher {
     fn wallet(&self) -> Result<NostrWalletConnectUri, String> {
         self.stored_wallet()?
             .ok_or_else(|| "Connect a wallet first".into())
+    }
+
+    fn answer(&self, game: &str, id: &str, allow: bool) {
+        let mut pending = self.pending.lock().unwrap();
+        let id = id
+            .parse()
+            .ok()
+            .filter(|id| pending.get(id).is_some_and(|(g, _)| g == game));
+        if let Some((_, reply)) = id.and_then(|id| pending.remove(&id)) {
+            let _ = reply.send(allow);
+        }
     }
 
     fn game(&self, window: &WebviewWindow) -> Result<Game, String> {
@@ -258,8 +348,18 @@ fn open_game(
         .start(&label, &coordinate, meter::now());
     let closed = label.clone();
     let coordinate_closed = coordinate.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::Destroyed = event {
+    window.on_window_event(move |event| match event {
+        WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+            if let Some(game) = app.get_webview_window(&closed) {
+                follow(&game);
+            }
+        }
+        WindowEvent::Destroyed => {
+            for (label, panel) in app.webview_windows() {
+                if label.starts_with(&format!("{closed}-")) {
+                    let _ = panel.destroy();
+                }
+            }
             app.state::<Mutex<Meter>>()
                 .lock()
                 .unwrap()
@@ -267,6 +367,7 @@ fn open_game(
             app.state::<Launcher>().games.lock().unwrap().remove(&closed);
             let _ = app.emit_to("main", "closed", json!({"coordinate": coordinate_closed}));
         }
+        _ => {}
     });
     state
         .games
@@ -297,11 +398,181 @@ fn close_game(app: AppHandle, state: State<Launcher>, label: String) -> Result<(
     }
 }
 
-#[tauri::command]
-fn answer_sign_request(state: State<Launcher>, id: u64, allow: bool) {
-    if let Some(reply) = state.pending.lock().unwrap().remove(&id) {
-        let _ = reply.send(allow);
+/// Height of the game's title bar, which Tauri on macOS counts as content though the page sits below it.
+#[cfg(target_os = "macos")]
+fn title_bar(game: &WebviewWindow) -> f64 {
+    let (height, read) = std::sync::mpsc::channel();
+    let window = game.clone();
+    let _ = game.run_on_main_thread(move || {
+        if let Ok(ns_window) = window.ns_window() {
+            // SAFETY: this runs on the main thread and the pointer is the game's live NSWindow.
+            let ns_window = unsafe { &*ns_window.cast::<objc2_app_kit::NSWindow>() };
+            let (frame, content) = (ns_window.frame(), ns_window.contentLayoutRect());
+            let _ = height.send(frame.size.height - content.origin.y - content.size.height);
+        }
+    });
+    read.recv().unwrap_or(0.0)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn title_bar(_: &WebviewWindow) -> f64 {
+    0.0
+}
+
+/// The host's place over the game's content, below its title bar.
+fn frame(
+    game: &WebviewWindow,
+    host: &Host,
+) -> tauri::Result<(LogicalPosition<f64>, LogicalSize<f64>)> {
+    let scale = game.scale_factor()?;
+    let bar = title_bar(game);
+    let at: LogicalPosition<f64> = game.inner_position()?.to_logical(scale);
+    let at = LogicalPosition::new(at.x, at.y + bar);
+    let size: LogicalSize<f64> = game.inner_size()?.to_logical(scale);
+    let size = LogicalSize::new(size.width, size.height - bar);
+    if host.interactive {
+        return Ok((at, size));
     }
+    let (width, height) = TOAST_SIZE;
+    Ok((
+        LogicalPosition::new(at.x + size.width - width, at.y + size.height - height),
+        LogicalSize::new(width, height),
+    ))
+}
+
+/// Keeps the game's overlay and toasts over it when it moves or resizes.
+fn follow(game: &WebviewWindow) {
+    for host in HOSTS {
+        if let (Some(window), Ok((at, size))) = (
+            game.get_webview_window(&format!("{}-{}", game.label(), host.name)),
+            frame(game, host),
+        ) {
+            let _ = window.set_position(at);
+            let _ = window.set_size(size);
+        }
+    }
+}
+
+/// Shows a Keyhall panel in its host window over the game, so the game can't script it.
+fn show_panel(
+    game: &WebviewWindow,
+    panel: &Panel,
+    id: &str,
+    props: serde_json::Value,
+) -> Result<(), String> {
+    let host = panel.host;
+    let label = format!("{}-{}", game.label(), host.name);
+    let item = json!({"kind": panel.kind, "id": id, "props": props});
+    let window = match game.get_webview_window(&label) {
+        Some(window) => {
+            window
+                .eval(format!(
+                    "dispatchEvent(new CustomEvent('panel', {{ detail: {item} }}))"
+                ))
+                .map_err(|e| e.to_string())?;
+            window
+        }
+        None => {
+            let (at, size) = frame(game, host).map_err(|e| e.to_string())?;
+            let page = json!({"host": host.name, "items": [item]});
+            let window =
+                WebviewWindowBuilder::new(game, &label, WebviewUrl::App("index.html".into()))
+                    .initialization_script(format!(
+                        "window.panel = {page}; addEventListener('panel', (e) => window.panel.items.push(e.detail));"
+                    ))
+                    .parent(game)
+                    .map_err(|e| e.to_string())?
+                    .decorations(false)
+                    .resizable(false)
+                    .transparent(true)
+                    .shadow(false)
+                    .focused(host.interactive)
+                    .inner_size(size.width, size.height)
+                    .position(at.x, at.y)
+                    .build()
+                    .map_err(|e| e.to_string())?;
+            if host.interactive {
+                let app = game.app_handle().clone();
+                let game = game.label().to_string();
+                window.on_window_event(move |event| {
+                    if let WindowEvent::Destroyed = event {
+                        let launcher = app.state::<Launcher>();
+                        launcher
+                            .pending
+                            .lock()
+                            .unwrap()
+                            .retain(|_, (g, _)| *g != game);
+                    }
+                });
+            } else {
+                window
+                    .set_ignore_cursor_events(true)
+                    .map_err(|e| e.to_string())?;
+            }
+            window
+        }
+    };
+    if !host.interactive {
+        return Ok(());
+    }
+    let _ = game.set_focus();
+    window.set_focus().map_err(|e| e.to_string())
+}
+
+fn notice(game: &WebviewWindow, id: &str, props: serde_json::Value) -> Result<(), String> {
+    show_panel(game, &PANELS[0], id, props)
+}
+
+#[tauri::command]
+fn open_panel(
+    app: AppHandle,
+    state: State<Launcher>,
+    game: String,
+    kind: String,
+    id: String,
+    props: serde_json::Value,
+) -> Result<(), String> {
+    let panel = launcher_panel(&kind)?;
+    let window = app
+        .get_webview_window(&game)
+        .ok_or("The game window is closed")?;
+    state.game(&window)?;
+    show_panel(&window, panel, &id, props)
+}
+
+#[tauri::command]
+fn close_panel(window: WebviewWindow) -> Result<(), String> {
+    host_of(window.label()).ok_or("not a panel host")?;
+    window.destroy().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn answer_notice(
+    window: WebviewWindow,
+    state: State<Launcher>,
+    id: String,
+    allow: bool,
+) -> Result<(), String> {
+    match host_of(window.label()) {
+        Some((game, host)) if *host == OVERLAY => state.answer(game, &id, allow),
+        _ => return Err("not an overlay".into()),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn open_overlay(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<Launcher>,
+) -> Result<(), String> {
+    let game = state.game(&window)?;
+    app.emit_to(
+        "main",
+        "panel",
+        json!({"coordinate": game.coordinate, "kind": "session"}),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -363,18 +634,16 @@ async fn nostr_sign_event(
     if !state.approved.lock().unwrap().contains(&approval) {
         let id = state.next_request.fetch_add(1, Ordering::Relaxed);
         let (reply, answer) = oneshot::channel();
-        state.pending.lock().unwrap().insert(id, reply);
-        let main = app
-            .get_webview_window("main")
-            .ok_or("The launcher window is closed")?;
-        let _ = main.unminimize();
-        let _ = main.set_focus();
-        let _ = main.request_user_attention(Some(UserAttentionType::Critical));
-        main.emit(
-            "sign-request",
-            json!({"id": id, "game": game.name, "coordinate": game.coordinate, "kind": event.kind, "content": event.content}),
-        )
-        .map_err(|e| e.to_string())?;
+        state
+            .pending
+            .lock()
+            .unwrap()
+            .insert(id, (window.label().to_string(), reply));
+        notice(
+            &window,
+            &id.to_string(),
+            json!({"game": game.name, "kind": event.kind, "content": event.content}),
+        )?;
         if !answer.await.unwrap_or(false) {
             return Err("The player declined to sign".into());
         }
@@ -412,11 +681,8 @@ fn nostr_key_field(
     state: State<Launcher>,
 ) -> Result<(), String> {
     let game = state.game(&window)?;
-    let main = app
-        .get_webview_window("main")
-        .ok_or("The launcher window is closed")?;
-    let _ = main.set_focus();
-    main.emit("key-field", game.coordinate)
+    notice(&window, "key", json!({"game": game.name}))?;
+    app.emit_to("main", "key-field", game.coordinate)
         .map_err(|e| e.to_string())
 }
 
@@ -481,6 +747,9 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             hide_traffic_lights(&app.get_webview_window("main").expect("main window"))?;
+            for host in HOSTS {
+                app.add_capability(host_capability(host))?;
+            }
             let path = app.path().app_data_dir()?.join("playtime.json");
             app.manage(Mutex::new(Meter::load(path)));
             let handle = app.handle().clone();
@@ -507,7 +776,10 @@ pub fn run() {
             open_game,
             check_game,
             close_game,
-            answer_sign_request,
+            answer_notice,
+            open_panel,
+            close_panel,
+            open_overlay,
             sign_event,
             nip44_encrypt,
             nip44_decrypt,
@@ -550,5 +822,62 @@ mod tests {
         );
         assert!(origin_pattern("http://blockstr.io").is_err());
         assert!(origin_pattern("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn only_keyhall_hosts_over_a_game_parse_as_hosts() {
+        let game = game_label("https://blockstr.io");
+        let overlay = format!("{game}-overlay");
+        assert_eq!(host_of(&overlay).unwrap(), (game.as_str(), &OVERLAY));
+        assert_eq!(host_of(&format!("{game}-toasts")).unwrap().1, &TOASTS);
+        for label in [
+            &game,
+            "main",
+            "game-x-dms",
+            "overlay",
+            "x-overlay",
+            "game-x-y-overlay",
+        ] {
+            assert!(host_of(label).is_none(), "{label}");
+        }
+    }
+
+    #[test]
+    fn hosts_get_only_their_panels_commands() {
+        assert_eq!(
+            host_permissions(&OVERLAY),
+            ["allow-close-panel", "allow-answer-notice"]
+        );
+        assert_eq!(host_permissions(&TOASTS), ["allow-close-panel"]);
+        for host in HOSTS {
+            assert!(
+                host_permissions(host)
+                    .iter()
+                    .all(|p| !GAME_PERMISSIONS.contains(p))
+            );
+        }
+    }
+
+    #[test]
+    fn the_launcher_opens_sessions_and_toasts_but_never_notices() {
+        assert!(launcher_panel("session").is_ok());
+        assert!(launcher_panel("toast").is_ok());
+        assert!(launcher_panel("notice").is_err());
+        assert!(launcher_panel("dms").is_err());
+    }
+
+    #[test]
+    fn only_the_game_that_asked_answers_its_sign_request() {
+        let launcher = Launcher::default();
+        let (reply, mut answer) = oneshot::channel();
+        launcher
+            .pending
+            .lock()
+            .unwrap()
+            .insert(7, ("game-a".into(), reply));
+        launcher.answer("game-b", "7", true);
+        assert!(answer.try_recv().is_err());
+        launcher.answer("game-a", "7", true);
+        assert_eq!(answer.try_recv(), Ok(true));
     }
 }

@@ -1,4 +1,9 @@
-function install() {
+export const combo = (e: KeyboardEvent) =>
+  [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Cmd", e.key]
+    .filter(Boolean)
+    .join("+");
+
+function install(hotkey: string, keys: typeof combo) {
   const invoke = (
     window as unknown as {
       __TAURI_INTERNALS__: { invoke(cmd: string, args: object): Promise<never> };
@@ -9,6 +14,17 @@ function install() {
     signEvent: ({ kind, content, tags, created_at }: Record<string, unknown>) =>
       invoke("nostr_sign_event", { event: { kind, content, tags, created_at } }),
   };
+
+  addEventListener(
+    "keydown",
+    (e) => {
+      if (keys(e) !== hotkey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      invoke("open_overlay", {}).catch(() => {});
+    },
+    true,
+  );
 
   const seen = new Set<number>();
   const send = WebSocket.prototype.send;
@@ -55,4 +71,5 @@ function install() {
   scan();
 }
 
-export const shimScript = () => `(${install.toString()})();`;
+export const shimScript = (hotkey: string) =>
+  `(${install.toString()})(${JSON.stringify(hotkey)}, ${combo.toString()});`;

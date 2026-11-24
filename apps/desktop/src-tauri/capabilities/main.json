@@ -17,7 +17,7 @@
     "allow-open-game",
     "allow-check-game",
     "allow-close-game",
-    "allow-answer-sign-request",
+    "allow-open-panel",
     "allow-sign-event",
     "allow-nip44-encrypt",
     "allow-nip44-decrypt",

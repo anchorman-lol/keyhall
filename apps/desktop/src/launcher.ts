@@ -1,5 +1,5 @@
 import type { DmDeps } from "@keyhall/core/dm";
-import { launcherMachine, type ShimCall, type SignRequest } from "@keyhall/core/launcher";
+import { launcherMachine, type LauncherEvent, type ShimCall } from "@keyhall/core/launcher";
 import {
   fetchFriends,
   fetchGames,
@@ -67,16 +67,17 @@ const machine = launcherMachine(
     fetchLabels,
     signLabel: (event) => invoke("sign_label", { event }),
     publish,
-    openGame: (game) =>
+    openGame: (game, hotkey) =>
       invoke("open_game", {
         name: game.name,
         coordinate: game.coordinate,
         url: game.url,
-        shim: shimScript(),
+        shim: shimScript(hotkey),
       }),
+    openPanel: (game, kind, id, props) => void invoke("open_panel", { game, kind, id, props }),
+    saveHotkey: (hotkey) => localStorage.setItem("hotkey", JSON.stringify(hotkey)),
     checkGame: (label) => void invoke("check_game", { label }),
     closeGame: (label) => void invoke("close_game", { label }),
-    answer: (id, allow) => void invoke("answer_sign_request", { id, allow }),
     listen: (send) => {
       const subscriptions = [
         listen<ShimCall>("shim", ({ payload }) => send({ type: "shim", call: payload })),
@@ -86,8 +87,8 @@ const machine = launcherMachine(
         listen<{ coordinate: string }>("closed", ({ payload }) =>
           send({ type: "closed", ...payload }),
         ),
-        listen<SignRequest>("sign-request", ({ payload }) =>
-          send({ type: "sign-request", request: payload }),
+        listen<LauncherEvent & { type: "panel" }>("panel", ({ payload }) =>
+          send({ ...payload, type: "panel" }),
         ),
         listen<string>("key-field", ({ payload }) =>
           send({ type: "key-field", coordinate: payload }),
@@ -132,6 +133,7 @@ const machine = launcherMachine(
     relays,
     budget: JSON.parse(localStorage.getItem("budget") ?? "null") ?? undefined,
     friendsOpen: JSON.parse(localStorage.getItem("friendsOpen") ?? "null") ?? undefined,
+    hotkey: JSON.parse(localStorage.getItem("hotkey") ?? "null") ?? undefined,
     ...JSON.parse(localStorage.getItem("presence") ?? "{}"),
   },
 );
