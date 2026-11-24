@@ -20,12 +20,15 @@ import { Card, CardContent } from "@keyhall/ui/components/card";
 import {
   AppWindowIcon,
   ArrowLeftIcon,
+  PencilSimpleIcon,
   PlayIcon,
   SealCheckIcon,
   StopIcon,
+  TrashIcon,
 } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { DEPTH, DepthBadge, SIGN_IN, SignInBadge, verifiers } from "./badges.tsx";
+import { CustomDialog } from "./CustomDialog.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
 import { LabelDialog } from "./LabelDialog.tsx";
 import { formatDate, Launcher, minutes, useNow } from "./launcher.ts";
@@ -112,6 +115,8 @@ export function GamePage({ game }: { game: Game }) {
   const month = monthKey(new Date(now * 1000));
   const seconds = playTime(context.sessions, month)[game.coordinate] ?? 0;
   const share = monthSplit(context, month).shares.find((s) => s.coordinate === game.coordinate);
+  const entry = context.custom.find((c) => `custom:${c.id}` === game.coordinate);
+  const app = game.custom === "app";
   return (
     <main className="relative h-full min-h-0 overflow-y-auto">
       <Button
@@ -147,22 +152,26 @@ export function GamePage({ game }: { game: Game }) {
               {run ? (
                 <>
                   <Button size="lg" onClick={() => send({ type: "play", game })}>
-                    <AppWindowIcon data-icon="inline-start" /> Show window
+                    <AppWindowIcon data-icon="inline-start" /> Show {app ? "app" : "window"}
                   </Button>
-                  <Button
-                    size="lg"
-                    variant="secondary"
-                    onClick={() => send({ type: "check", game })}
-                  >
-                    <SealCheckIcon data-icon="inline-start" /> Test sign-in
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="secondary"
-                    onClick={() => send({ type: "quit", game })}
-                  >
-                    <StopIcon weight="fill" data-icon="inline-start" /> Quit
-                  </Button>
+                  {!app && (
+                    <>
+                      <Button
+                        size="lg"
+                        variant="secondary"
+                        onClick={() => send({ type: "check", game })}
+                      >
+                        <SealCheckIcon data-icon="inline-start" /> Test sign-in
+                      </Button>
+                      <Button
+                        size="lg"
+                        variant="secondary"
+                        onClick={() => send({ type: "quit", game })}
+                      >
+                        <StopIcon weight="fill" data-icon="inline-start" /> Quit
+                      </Button>
+                    </>
+                  )}
                   {run.since && (
                     <span className="ml-1 flex items-center gap-1.5 text-[12px] text-online tabular-nums">
                       <Live /> {minutes(now - run.since)}
@@ -176,7 +185,26 @@ export function GamePage({ game }: { game: Game }) {
                   <PlayIcon weight="fill" data-icon="inline-start" /> Play
                 </Button>
               )}
-              {isCurator(context) && <LabelDialog game={game} depth={depth.value} />}
+              {isCurator(context) && !entry && <LabelDialog game={game} depth={depth.value} />}
+              {entry && (
+                <>
+                  <CustomDialog entry={entry} trigger={<Button size="lg" variant="secondary" />}>
+                    <PencilSimpleIcon data-icon="inline-start" /> Edit
+                  </CustomDialog>
+                  {!run && (
+                    <Button
+                      size="lg"
+                      variant="ghost"
+                      onClick={() => {
+                        send({ type: "custom.remove", id: entry.id });
+                        send({ type: "select" });
+                      }}
+                    >
+                      <TrashIcon data-icon="inline-start" /> Remove
+                    </Button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -210,58 +238,64 @@ export function GamePage({ game }: { game: Game }) {
               <p className="text-[12px] text-muted-foreground">No friends are playing it now.</p>
             )}
           </Block>
-          <Block title="Signatures" end={calls.length ? "since Keyhall started" : undefined}>
-            {calls.length ? (
-              <SignerLog calls={calls.slice(-8).reverse()} />
-            ) : (
-              <p className="text-[12px] text-muted-foreground">
-                Keyhall hasn't signed anything for it yet. Press Play, then Test sign-in.
-              </p>
-            )}
-          </Block>
+          {!app && (
+            <Block title="Signatures" end={calls.length ? "since Keyhall started" : undefined}>
+              {calls.length ? (
+                <SignerLog calls={calls.slice(-8).reverse()} />
+              ) : (
+                <p className="text-[12px] text-muted-foreground">
+                  Keyhall hasn't signed anything for it yet. Press Play, then Test sign-in.
+                </p>
+              )}
+            </Block>
+          )}
         </div>
         <Card size="sm" className="self-start">
           <CardContent className="grid gap-6">
-            <Block title="Sign-in trust">
-              <dl className="grid gap-4 text-sm">
-                <Fact label="Sign-in">
-                  <SignInBadge verdict={signIn} by={verifiers(context, signIn)} />{" "}
-                  {SIGN_IN[signIn.value!].text}
-                  <Checks
-                    verdict={signIn}
-                    context={context}
-                    label={(c) => (c.from === "window" ? seenSignIn(c) : SIGN_IN[c.value].label)}
-                  />
-                </Fact>
-                <Fact label="Nostr depth">
-                  {depth.value ? (
-                    <>
-                      <DepthBadge verdict={depth} by={verifiers(context, depth)} />{" "}
-                      {depth.seen
-                        ? "Seen in the game window. "
-                        : depth.verifiedBy.length
-                          ? ""
-                          : "Declared by the listing. "}
-                      {DEPTH[depth.value].text}
-                    </>
-                  ) : (
-                    "Not declared yet; play to find out."
-                  )}
-                  <Checks verdict={depth} context={context} label={(c) => DEPTH[c.value].label} />
-                  {kinds.length > 0 && (
-                    <span className="block text-muted-foreground">
-                      Kinds seen: {kinds.join(", ")}
-                    </span>
-                  )}
-                </Fact>
-              </dl>
-            </Block>
-            <Block title="Listing">
+            {!app && (
+              <Block title="Sign-in trust">
+                <dl className="grid gap-4 text-sm">
+                  <Fact label="Sign-in">
+                    <SignInBadge verdict={signIn} by={verifiers(context, signIn)} />{" "}
+                    {SIGN_IN[signIn.value!].text}
+                    <Checks
+                      verdict={signIn}
+                      context={context}
+                      label={(c) => (c.from === "window" ? seenSignIn(c) : SIGN_IN[c.value].label)}
+                    />
+                  </Fact>
+                  <Fact label="Nostr depth">
+                    {depth.value ? (
+                      <>
+                        <DepthBadge verdict={depth} by={verifiers(context, depth)} />{" "}
+                        {depth.seen
+                          ? "Seen in the game window. "
+                          : depth.verifiedBy.length
+                            ? ""
+                            : "Declared by the listing. "}
+                        {DEPTH[depth.value].text}
+                      </>
+                    ) : (
+                      "Not declared yet; play to find out."
+                    )}
+                    <Checks verdict={depth} context={context} label={(c) => DEPTH[c.value].label} />
+                    {kinds.length > 0 && (
+                      <span className="block text-muted-foreground">
+                        Kinds seen: {kinds.join(", ")}
+                      </span>
+                    )}
+                  </Fact>
+                </dl>
+              </Block>
+            )}
+            <Block title={entry ? "Added by you" : "Listing"}>
               <dl className="grid gap-4 text-sm">
                 <Fact label="Your presence">
                   <ModeToggle coordinate={game.coordinate} />
                 </Fact>
-                <Fact label="Last updated">{formatDate(updatedAt(context, game))}</Fact>
+                <Fact label={entry ? "Added" : "Last updated"}>
+                  {formatDate(updatedAt(context, game))}
+                </Fact>
                 <Fact label="Plays at">{game.url}</Fact>
               </dl>
             </Block>

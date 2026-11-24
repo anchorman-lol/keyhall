@@ -92,6 +92,7 @@ function start(deps: Partial<LauncherDeps> = {}, stored: Partial<Stored> = {}) {
       [game, spam].filter((g) => coordinates.includes(g.coordinate)),
     fetchGames: async () => [game, spam],
     saveSources: vi.fn(),
+    saveCustom: vi.fn(),
     saveRelays: vi.fn(),
     probeRelay: async () => true,
     fetchLastUpdated: async () => 200,
@@ -997,5 +998,93 @@ describe("relays", () => {
     ]);
     actor.send({ type: "relay.remove", url });
     expect(deps.saveRelays).toHaveBeenLastCalledWith([]);
+  });
+});
+
+describe("custom games", () => {
+  const chess = { id: "a", name: "Chess", url: "https://blockstr.io", addedAt: 5 };
+  const celeste = { id: "b", name: "Celeste", url: "/Applications/Celeste.app", addedAt: 6 };
+
+  it("adds, edits and removes entries, saving each change, and rejects bad ones", () => {
+    const saveCustom = vi.fn();
+    const { actor } = start({ saveCustom });
+    actor.send({ type: "custom.save", input: { name: "Chess", url: "http://x" } });
+    expect(actor.getSnapshot().context.customError).toMatch(/https/);
+    expect(saveCustom).not.toHaveBeenCalled();
+    actor.send({ type: "custom.save", input: { name: "Chess", url: chess.url } });
+    const [added] = actor.getSnapshot().context.custom;
+    expect(added).toMatchObject({ name: "Chess", url: chess.url });
+    expect(actor.getSnapshot().context.customError).toBe("");
+    actor.send({
+      type: "select",
+      game: findGame(actor.getSnapshot().context, `custom:${added!.id}`),
+    });
+    actor.send({ type: "custom.save", input: { ...added!, name: "Chess 2" } });
+    expect(saveCustom).toHaveBeenLastCalledWith([{ ...added, name: "Chess 2" }]);
+    expect(actor.getSnapshot().context.current?.name).toBe("Chess 2");
+    actor.send({ type: "custom.remove", id: added!.id });
+    expect(saveCustom).toHaveBeenLastCalledWith([]);
+  });
+
+  it("puts custom games in the library ahead of a listing for the same URL", async () => {
+    const { actor } = start({}, { custom: [chess, celeste] });
+    await waitFor(actor, (s) => !!s.context.fetched[PICKS_ID]);
+    const entries = library(actor.getSnapshot().context);
+    expect(entries.map((e) => [e.game.name, e.from])).toEqual([
+      ["Celeste", ["custom"]],
+      ["Chess", ["custom", PICKS_ID]],
+    ]);
+    expect(sourceLabel(actor.getSnapshot().context, "custom")).toBe("Added by you");
+  });
+
+  it("plays a local app and publishes the friends-only status under its custom name until it exits", async () => {
+    const mock = relay();
+    const openGame = vi.fn(async () => "game-app");
+    const { actor, emit } = start(
+      { keyStatus: async () => npub, fetchFriends: async () => friends, openGame, ...mock },
+      { custom: [celeste] },
+    );
+    await waitFor(actor, (s) => s.matches({ friends: "ready" }));
+    const app = findGame(actor.getSnapshot().context, "custom:b")!;
+    actor.send({ type: "play", game: app });
+    await waitFor(actor, (s) => s.context.published?.coordinate === "custom:b");
+    expect(openGame).toHaveBeenCalledWith(
+      expect.objectContaining({ custom: "app" }),
+      expect.any(String),
+    );
+    const { circle } = actor.getSnapshot().context;
+    const status = mock.published.find((e) => e.kind === 30315)!;
+    expect(readStatus(status, circle!.secret)).toMatchObject({
+      content: "Playing Celeste",
+      coordinate: undefined,
+    });
+    expect(running(actor.getSnapshot().context).map((r) => r.game.name)).toEqual(["Celeste"]);
+
+    emit({ type: "closed", coordinate: "custom:b" });
+    await waitFor(actor, (s) => !s.context.published && s.matches({ presence: "idle" }));
+    expect(mock.published.at(-1)).toMatchObject({ kind: 30315, content: "" });
+  });
+
+  it("splits the budget to a custom game with a lightning address; one without is unpayable", async () => {
+    const month = previousMonth(monthKey(new Date()));
+    const [from] = monthRange(month);
+    const sessions = async () => [
+      { coordinate: "custom:a", start: from, end: from + 3600 },
+      { coordinate: "custom:b", start: from, end: from + 3600 },
+    ];
+    const { actor } = start(
+      { sessions },
+      { custom: [{ ...chess, lud16: "me@x.io" }, celeste], budget: { sats: 1000, paid: {} } },
+    );
+    actor.send({ type: "view", view: "budget" });
+    await waitFor(actor, (s) => s.context.sessions.length > 0);
+    const split = monthSplit(actor.getSnapshot().context, month);
+    expect(split.shares.map((s) => [s.coordinate, s.sats, s.reason])).toEqual([
+      ["custom:a", 990, undefined],
+      ["custom:b", 0, "unpayable"],
+    ]);
+    expect(split.payments).toEqual([
+      { key: "custom:a ", coordinate: "custom:a", pubkey: "", lud16: "me@x.io", sats: 990 },
+    ]);
   });
 });

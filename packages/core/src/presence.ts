@@ -74,10 +74,13 @@ export const circlePubkey = (secret: string) => getPublicKey(hexToBytes(secret))
 const circleKey = (secret: string) =>
   nip44.getConversationKey(hexToBytes(secret), circlePubkey(secret));
 
+const link = (game: Game) =>
+  !game.custom ? [["a", game.coordinate]] : game.custom === "web" ? [["r", game.url]] : [];
+
 function status(game: Game | undefined, now: number) {
   return {
     content: game ? `Playing ${game.name}` : "",
-    tags: game ? [["a", game.coordinate]] : [],
+    tags: game ? link(game) : [],
     expiration: game ? [["expiration", String(now + STATUS_TTL)]] : [],
   };
 }

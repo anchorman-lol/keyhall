@@ -17,6 +17,7 @@ import {
 } from "@keyhall/core/launcher";
 import type { Game } from "@keyhall/core/listing";
 import { sourceList } from "@keyhall/core/sources";
+import { Badge } from "@keyhall/ui/components/badge";
 import { Button } from "@keyhall/ui/components/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@keyhall/ui/components/empty";
 import { Input } from "@keyhall/ui/components/input";
@@ -28,12 +29,14 @@ import {
   CheckIcon,
   FunnelSimpleIcon,
   MagnifyingGlassIcon,
+  PlusIcon,
   SortAscendingIcon,
   StackIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { useState, type ReactNode } from "react";
 import { SignInBadge, verifiers } from "./badges.tsx";
+import { CustomDialog } from "./CustomDialog.tsx";
 import { FriendsPlaying } from "./Friends.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
 import { Launcher, useNow } from "./launcher.ts";
@@ -269,6 +272,10 @@ function Toolbar({
               ))}
             </PopoverContent>
           </Popover>
+          <CustomDialog trigger={<Button variant="secondary" size="sm" className="rounded-lg" />}>
+            <PlusIcon data-icon="inline-start" />
+            Add a game
+          </CustomDialog>
           {!npub && <KeyDialog />}
         </div>
       </header>
@@ -394,7 +401,11 @@ export function Library({
                     <span className="grid min-w-0 flex-1 gap-1">
                       <span className="truncate text-[13px] font-medium">{game.name}</span>
                       <span className="flex">
-                        <SignInBadge verdict={signIn} by={verifiers(context, signIn)} />
+                        {game.custom ? (
+                          <Badge variant="secondary">Custom</Badge>
+                        ) : (
+                          <SignInBadge verdict={signIn} by={verifiers(context, signIn)} />
+                        )}
                       </span>
                       <FriendsPlaying coordinate={game.coordinate} />
                     </span>

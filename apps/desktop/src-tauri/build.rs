@@ -6,6 +6,8 @@ fn main() {
             "import_key",
             "sign_out",
             "open_game",
+            "pick_app",
+            "launch_app",
             "check_game",
             "close_game",
             "answer_notice",

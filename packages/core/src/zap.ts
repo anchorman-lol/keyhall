@@ -65,7 +65,7 @@ export async function zapInvoice(
     throw new Error(`${payment.lud16} takes between ${min / 1000} and ${max / 1000} sats`);
   const url = new URL(String(pay.callback));
   url.searchParams.set("amount", String(msats));
-  if (pay.allowsNostr && pay.nostrPubkey) {
+  if (pay.allowsNostr && pay.nostrPubkey && payment.pubkey) {
     const request = finalizeEvent(
       {
         kind: 9734,
