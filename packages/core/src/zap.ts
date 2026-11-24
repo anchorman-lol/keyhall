@@ -44,20 +44,21 @@ export function payments(shares: Share[], games: Game[]): Payment[] {
   });
 }
 
-const read = async (res: Response) => {
-  const body = (await res.json()) as Record<string, unknown>;
-  if (body.status === "ERROR") throw new Error(String(body.reason));
-  return body;
-};
+export type FetchJson = (url: string) => Promise<Record<string, unknown>>;
 
 export async function zapInvoice(
-  fetch: (url: string | URL) => Promise<Response>,
+  fetchJson: FetchJson,
   payment: Payment & { lud16: string },
   comment: string,
   relays: string[],
 ): Promise<string> {
   const [name, domain] = payment.lud16.split("@");
-  const pay = await read(await fetch(`https://${domain}/.well-known/lnurlp/${name}`));
+  const read = async (url: string) => {
+    const body = await fetchJson(url);
+    if (body.status === "ERROR") throw new Error(String(body.reason));
+    return body;
+  };
+  const pay = await read(`https://${domain}/.well-known/lnurlp/${name}`);
   const msats = payment.sats * 1000;
   const [min, max] = [Number(pay.minSendable), Number(pay.maxSendable)];
   if (msats < min || msats > max)
@@ -84,7 +85,7 @@ export async function zapInvoice(
   } else if (Number(pay.commentAllowed) > 0) {
     url.searchParams.set("comment", comment.slice(0, Number(pay.commentAllowed)));
   }
-  const pr = String((await read(await fetch(url))).pr);
+  const pr = String((await read(url.href)).pr);
   const asked = getSatoshisAmountFromBolt11(pr);
   if (asked !== payment.sats) throw new Error(`The invoice asked for ${asked} sats`);
   return pr;

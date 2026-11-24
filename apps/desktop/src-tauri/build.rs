@@ -18,6 +18,7 @@ fn main() {
             "connect_wallet",
             "wallet_pay_request",
             "wallet_pay_result",
+            "lnurl_fetch",
             "play_sessions",
             "nostr_get_public_key",
             "nostr_sign_event",

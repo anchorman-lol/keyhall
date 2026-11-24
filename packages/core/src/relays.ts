@@ -15,7 +15,7 @@ import {
   type Relay,
   type Use,
 } from "./relaySettings";
-import { payOverNwc, zapInvoice, type Payment, type WalletRequest } from "./zap";
+import { payOverNwc, zapInvoice, type FetchJson, type Payment, type WalletRequest } from "./zap";
 
 const pool = new SimplePool();
 let settings = DEFAULT_RELAYS;
@@ -167,12 +167,13 @@ export async function zap(
   wallet: {
     request(invoice: string): Promise<WalletRequest>;
     result(reply: Event): Promise<string>;
+    lnurl: FetchJson;
   },
 ) {
   const lud16 = payment.lud16 ?? profileFields(await fetchProfileEvent(payment.pubkey)).lud16;
   if (!lud16) throw new Error("The developer's profile has no lightning address");
   const invoice = await zapInvoice(
-    fetch,
+    wallet.lnurl,
     { ...payment, lud16 },
     comment,
     relaysFor(settings, "zaps"),
