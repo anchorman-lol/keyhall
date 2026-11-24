@@ -13,10 +13,11 @@ pub struct EventRequest {
 /// Kinds the launcher window signs: the profile (kind 0), NIP-59 seals and NIP-38 statuses.
 const LAUNCHER_KINDS: [u16; 3] = [0, 13, 30315];
 
-/// Games never sign the profile, even with the player's approval; only the launcher edits it.
+/// Games never sign the profile or private messages, even with the player's approval.
 pub fn game_may_sign(kind: u16) -> Result<(), String> {
     match kind {
         0 => Err("Games can't change your profile".into()),
+        13 | 14 | 1059 => Err("Games can't send private messages".into()),
         _ => Ok(()),
     }
 }
@@ -99,8 +100,10 @@ mod tests {
     }
 
     #[test]
-    fn games_never_sign_the_profile() {
+    fn games_never_sign_the_profile_or_private_messages() {
         assert!(game_may_sign(0).is_err());
+        assert!(game_may_sign(13).is_err());
+        assert!(game_may_sign(1059).is_err());
         assert!(game_may_sign(1).is_ok());
         assert!(game_may_sign(30315).is_ok());
     }
