@@ -5,7 +5,7 @@ import { bytesToHex } from "nostr-tools/utils";
 import { npubEncode } from "nostr-tools/nip19";
 import { describe, expect, it, vi } from "vitest";
 import { createActor, waitFor } from "xstate";
-import { monthKey, monthRange, previousMonth, type Session } from "./budget";
+import { KEYHALL, monthKey, monthRange, previousMonth, type Session } from "./budget";
 import { PICKS_REF, type CuratorList, type ListRef } from "./curation";
 import type { Label } from "./labels";
 import {
@@ -807,7 +807,7 @@ describe("budget", () => {
   const words = { ...game, coordinate: "words", payTo: [{ pubkey: "w", weight: 1 }] };
   const sessions = async () => [hours("chess", 3), hours("words", 1)];
 
-  async function ready(deps: Partial<LauncherDeps> = {}, budget?: BudgetSettings) {
+  async function ready(deps: Partial<LauncherDeps> = {}, budget?: Partial<BudgetSettings>) {
     const started = start(
       {
         fetchGames: async () => [chess, words],
@@ -832,8 +832,9 @@ describe("budget", () => {
   it("saves the monthly budget", () => {
     const { actor, deps } = start();
     actor.send({ type: "budget.set", sats: 5000 });
-    expect(deps.saveBudget).toHaveBeenCalledWith({ sats: 5000, paid: {} });
-    expect(actor.getSnapshot().context.budget.sats).toBe(5000);
+    expect(deps.saveBudget).toHaveBeenCalledWith({ sats: 5000, paid: {}, share: 5 });
+    actor.send({ type: "budget.set", share: 0 });
+    expect(actor.getSnapshot().context.budget).toEqual({ sats: 5000, paid: {}, share: 0 });
   });
 
   it("connects a wallet and shows its errors", async () => {
@@ -863,21 +864,31 @@ describe("budget", () => {
     expect(actor.getSnapshot().context.view).toBeUndefined();
   });
 
-  it("pays last month's split once, after the player confirms", async () => {
+  it("pays last month's split and the Keyhall share once, after the player confirms", async () => {
     const pay = vi.fn<LauncherDeps["pay"]>(async () => {});
-    const { actor, deps } = await ready({ pay });
+    const { actor, deps } = await ready({ pay }, { sats: 4000, paid: {}, share: 5 });
     expect(pay).not.toHaveBeenCalled();
     actor.send({ type: "budget.pay", month: lastMonth });
-    await waitFor(actor, (s) => s.matches({ budget: "idle" }) && pay.mock.calls.length === 2);
+    await waitFor(actor, (s) => s.matches({ budget: "idle" }) && pay.mock.calls.length === 3);
     expect(pay.mock.calls.map(([p]) => p)).toEqual([
-      { key: "chess c", coordinate: "chess", pubkey: "c", lud16: "c@x.io", sats: 743 },
-      { key: "words w", coordinate: "words", pubkey: "w", sats: 247 },
+      { key: "chess c", coordinate: "chess", pubkey: "c", lud16: "c@x.io", sats: 2820 },
+      { key: "words w", coordinate: "words", pubkey: "w", sats: 940 },
+      { ...KEYHALL, sats: 200 },
     ]);
     expect(deps.saveBudget).toHaveBeenLastCalledWith({
-      sats: 1000,
-      paid: { [lastMonth]: { "chess c": 743, "words w": 247 } },
+      sats: 4000,
+      share: 5,
+      paid: { [lastMonth]: { "chess c": 2820, "words w": 940, [KEYHALL.key]: 200 } },
     });
     expect(monthSplit(actor.getSnapshot().context, lastMonth).payments).toEqual([]);
+  });
+
+  it("takes no Keyhall share from months paid before it existed", async () => {
+    const { actor } = await ready({}, { sats: 4000, paid: { [lastMonth]: { "chess c": 2970 } } });
+    expect(monthSplit(actor.getSnapshot().context, lastMonth)).toMatchObject({
+      keyhall: 0,
+      payments: [{ key: "words w", sats: 990 }],
+    });
   });
 
   it("keeps failed payments for a retry that skips the paid ones", async () => {

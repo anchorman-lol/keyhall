@@ -1,7 +1,7 @@
 import { decode, npubEncode } from "nostr-tools/nip19";
 import { verifyEvent, type Event } from "nostr-tools/pure";
 import { assign, enqueueActions, fromCallback, fromPromise, setup } from "xstate";
-import { monthKey, monthName, playTime, split, type Session } from "./budget";
+import { KEYHALL, monthKey, monthName, playTime, split, type Session } from "./budget";
 import { parseListRef, PICKS, PICKS_PUBKEY, type CuratorList, type ListRef } from "./curation";
 import type { Depth, Observation } from "./depth";
 import {
@@ -104,6 +104,7 @@ export interface LauncherDeps extends PresenceDeps {
 
 export interface BudgetSettings {
   sats: number;
+  share: number;
   paid: Record<string, Record<string, number>>;
 }
 
@@ -113,7 +114,7 @@ export interface Stored {
   circle: Circle;
   sources: SourceSettings;
   relays: Relay[];
-  budget: BudgetSettings;
+  budget: Partial<BudgetSettings>;
   friendsOpen: boolean;
   hotkey: string;
 }
@@ -191,7 +192,7 @@ type Events =
   | { type: "presence.game"; coordinate: string; mode?: PresenceMode }
   | { type: "friend-status"; pubkey: string; at: number; status?: Status }
   | { type: "sessions"; sessions: Session[] }
-  | { type: "budget.set"; sats: number }
+  | ({ type: "budget.set" } & Partial<Pick<BudgetSettings, "sats" | "share">>)
   | { type: "wallet.connect"; uri: string }
   | { type: "budget.pay"; month: string }
   | { type: "zap.done"; month: string; payment: Payment; error?: string }
@@ -315,16 +316,23 @@ export const panels = {
 export function monthSplit(context: LauncherContext, month: string) {
   const games = Object.values(context.listings);
   const paid = context.budget.paid[month] ?? {};
-  const { shares, reserve } = split(
+  const share = paid[KEYHALL.key] === 0 ? 0 : context.budget.share;
+  const { shares, reserve, keyhall } = split(
     context.budget.sats,
     playTime(context.sessions, month),
     (c) => !!findGame(context, c)?.payTo.length,
+    share,
   );
   return {
     shares,
     reserve,
+    keyhall,
+    share,
     paid,
-    payments: payments(shares, games).filter((p) => !(p.key in paid)),
+    payments: [
+      ...payments(shares, games),
+      ...(keyhall ? [{ ...KEYHALL, sats: keyhall }] : []),
+    ].filter((p) => !(p.key in paid)),
   };
 }
 
@@ -496,7 +504,19 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       hotkey: stored.hotkey ?? "Shift+Tab",
       presence: stored.presence ?? DEFAULT_PRESENCE,
       circle: stored.circle,
-      budget: stored.budget ?? { sats: 0, paid: {} },
+      budget: {
+        sats: 0,
+        share: 5,
+        ...stored.budget,
+        paid: Object.fromEntries(
+          Object.entries(stored.budget?.paid ?? {}).map(([month, keys]) => [
+            month,
+            stored.budget?.share === undefined && Object.keys(keys).length
+              ? { [KEYHALL.key]: 0, ...keys }
+              : keys,
+          ]),
+        ),
+      },
       sessions: [],
       wallet: null,
       walletError: "",
@@ -697,7 +717,13 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
       sessions: { actions: assign({ sessions: ({ event }) => event.sessions }) },
       "budget.set": {
         actions: [
-          assign({ budget: ({ context, event }) => ({ ...context.budget, sats: event.sats }) }),
+          assign({
+            budget: ({ context: { budget }, event }) => ({
+              ...budget,
+              sats: event.sats ?? budget.sats,
+              share: event.share ?? budget.share,
+            }),
+          }),
           "saveBudget",
         ],
       },

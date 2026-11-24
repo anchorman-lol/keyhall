@@ -1,3 +1,5 @@
+import { PICKS_PUBKEY } from "./curation";
+
 export interface Session {
   coordinate: string;
   start: number;
@@ -11,6 +13,13 @@ export interface Share {
   sats: number;
   reason?: "floor" | "unpayable" | "minimum";
 }
+
+export const KEYHALL = {
+  key: "keyhall",
+  coordinate: "",
+  pubkey: PICKS_PUBKEY,
+  lud16: "trimpayment17@walletofsatoshi.com",
+};
 
 const FLOOR = 15 * 60;
 const MINIMUM_PAYOUT = 100;
@@ -52,8 +61,11 @@ export function split(
   budget: number,
   seconds: Record<string, number>,
   payable: (coordinate: string) => boolean,
-): { shares: Share[]; reserve: number } {
+  percent: number,
+): { shares: Share[]; reserve: number; keyhall: number } {
   const reserve = Math.ceil(budget / 100);
+  let keyhall = Math.round((budget * percent) / 100);
+  if (keyhall < MINIMUM_PAYOUT) keyhall = 0;
   const counted = Object.values(seconds)
     .filter((s) => s >= FLOOR)
     .reduce((a, b) => a + b, 0);
@@ -65,9 +77,12 @@ export function split(
     });
   for (;;) {
     const paid = shares.filter((s) => !s.reason);
-    if (!paid.length || budget <= 0) break;
+    if (!paid.length || budget <= 0) {
+      keyhall = 0;
+      break;
+    }
     const sats = apportion(
-      budget - reserve,
+      budget - reserve - keyhall,
       paid.map((s) => s.seconds),
     );
     const small = sats.findLastIndex((s) => s < MINIMUM_PAYOUT);
@@ -77,7 +92,7 @@ export function split(
     }
     paid[small]!.reason = "minimum";
   }
-  return { shares, reserve };
+  return { shares, reserve, keyhall };
 }
 
 export const payouts = (paid: Record<string, Record<string, number>>) =>
@@ -87,5 +102,9 @@ export const payouts = (paid: Record<string, Record<string, number>>) =>
     .map(([month, keys]) => ({
       month,
       sats: Object.values(keys).reduce((a, b) => a + b, 0),
-      games: new Set(Object.keys(keys).map((k) => k.split(" ")[0])).size,
+      games: new Set(
+        Object.keys(keys)
+          .filter((k) => k !== KEYHALL.key)
+          .map((k) => k.split(" ")[0]),
+      ).size,
     }));
