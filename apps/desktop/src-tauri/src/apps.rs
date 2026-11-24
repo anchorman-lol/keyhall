@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const POLL: Duration = Duration::from_millis(500);
-const PICK: &str = r#"POSIX path of (choose file of type {"com.apple.application-bundle"} default location (path to applications folder) with prompt "Choose a game or app")"#;
 
 /// A launched process Keyhall watches until it exits or Keyhall stops watching.
 pub struct Tracked(Arc<Mutex<Child>>);
@@ -30,40 +29,38 @@ pub fn track(
     Ok(Tracked(child))
 }
 
-fn bundle(path: &str) -> Result<&str, String> {
-    let trimmed = path.trim_end_matches('/');
-    if trimmed.starts_with('/') && trimmed.ends_with(".app") && Path::new(trimmed).is_dir() {
-        Ok(trimmed)
-    } else {
-        Err("Choose a macOS app (.app)".into())
-    }
+/// The command for a picked file, running as long as the program does.
+pub fn launch(path: &str) -> Result<Command, String> {
+    let path = Path::new(path.trim_end_matches(['/', '\\']));
+    path.is_absolute()
+        .then(|| program(path))
+        .flatten()
+        .ok_or_else(|| "Keyhall can't launch that file on this computer".into())
 }
 
-/// `open -W` runs as long as the app does, so its exit is the app's.
-pub fn open(path: &str, wait: bool) -> Result<Command, String> {
-    let mut command = Command::new("/usr/bin/open");
-    if wait {
-        command.arg("-W");
-    }
-    command.arg("-a").arg(bundle(path)?);
-    Ok(command)
-}
+/// The per-OS part: which files the picker offers and how one becomes a command.
+#[cfg(target_os = "macos")]
+pub const PICK: &[&str] = &["app"];
+#[cfg(windows)]
+pub const PICK: &[&str] = &["exe"];
+#[cfg(not(any(target_os = "macos", windows)))]
+pub const PICK: &[&str] = &[];
 
-/// The macOS file dialog for apps; `None` when the player cancels.
-pub fn pick() -> Result<Option<String>, String> {
-    let out = Command::new("/usr/bin/osascript")
-        .args(["-e", PICK])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Ok(None);
+fn program(path: &Path) -> Option<Command> {
+    #[cfg(target_os = "macos")]
+    if path.extension().is_some_and(|e| e == "app") && path.is_dir() {
+        let mut open = Command::new("/usr/bin/open");
+        open.arg("-W").arg("-a").arg(path);
+        return Some(open);
     }
-    Ok(Some(
-        String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .trim_end_matches('/')
-            .into(),
-    ))
+    #[cfg(unix)]
+    let runs =
+        std::os::unix::fs::PermissionsExt::mode(&path.metadata().ok()?.permissions()) & 0o111 != 0;
+    #[cfg(windows)]
+    let runs = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+    (runs && path.is_file()).then(|| Command::new(path))
 }
 
 #[cfg(test)]
@@ -92,18 +89,27 @@ mod tests {
         assert!(exited.recv_timeout(Duration::from_secs(5)).is_ok());
     }
 
+    #[cfg(unix)]
     #[test]
-    fn launches_only_app_bundles() {
+    fn launches_an_executable_directly() {
+        let command = launch("/bin/sleep").unwrap();
+        assert_eq!(command.get_program(), "/bin/sleep");
+        assert_eq!(command.get_args().count(), 0);
+        assert!(launch("/etc/hosts").is_err());
+        assert!(launch("/bin").is_err());
+        assert!(launch("bin/sleep").is_err());
+        assert!(launch("/bin/missing").is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn launches_an_app_bundle_through_open() {
         let dir = std::env::temp_dir().join(format!("keyhall-apps-{}", std::process::id()));
         let app = dir.join("Game.app");
         std::fs::create_dir_all(&app).unwrap();
-        let command = open(&format!("{}/", app.display()), true).unwrap();
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["-W", "-a", app.to_str().unwrap()]
-        );
-        assert!(open("/bin/sh", true).is_err());
-        assert!(open("Game.app", true).is_err());
-        assert!(open(dir.join("Missing.app").to_str().unwrap(), true).is_err());
+        let command = launch(&format!("{}/", app.display())).unwrap();
+        assert_eq!(command.get_program(), "/usr/bin/open");
+        assert!(command.get_args().eq(["-W", "-a", app.to_str().unwrap()]));
+        assert!(launch(dir.join("Missing.app").to_str().unwrap()).is_err());
     }
 }

@@ -151,11 +151,11 @@ export function GamePage({ game }: { game: Game }) {
             <div className="mt-5 flex flex-wrap items-center gap-2">
               {run ? (
                 <>
-                  <Button size="lg" onClick={() => send({ type: "play", game })}>
-                    <AppWindowIcon data-icon="inline-start" /> Show {app ? "app" : "window"}
-                  </Button>
                   {!app && (
                     <>
+                      <Button size="lg" onClick={() => send({ type: "play", game })}>
+                        <AppWindowIcon data-icon="inline-start" /> Show window
+                      </Button>
                       <Button
                         size="lg"
                         variant="secondary"

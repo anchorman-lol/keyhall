@@ -20,6 +20,7 @@ use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::oneshot;
 use url::Url;
@@ -399,10 +400,16 @@ fn game_closed(app: &AppHandle, label: &str, coordinate: &str) {
 }
 
 #[tauri::command]
-async fn pick_app() -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(apps::pick)
-        .await
-        .map_err(|e| e.to_string())?
+async fn pick_app(app: AppHandle) -> Option<String> {
+    let mut dialog = app.dialog().file().set_title("Choose a game or app");
+    if !apps::PICK.is_empty() {
+        dialog = dialog.add_filter("Apps", apps::PICK);
+    }
+    let (tx, rx) = oneshot::channel();
+    dialog.pick_file(|path| {
+        let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+    });
+    Some(rx.await.ok()??.to_string_lossy().into())
 }
 
 #[tauri::command]
@@ -415,13 +422,10 @@ fn launch_app(
     path: String,
 ) -> Result<String, String> {
     let label = game_label(&path);
-    let command = apps::open(&path, true)?;
     if state.apps.lock().unwrap().contains_key(&label) {
-        apps::open(&path, false)?
-            .spawn()
-            .map_err(|e| e.to_string())?;
         return Ok(label);
     }
+    let command = apps::launch(&path)?;
     game_started(&state, &meter, &label, name, coordinate.clone());
     let (closed, coordinate_closed, handle) = (label.clone(), coordinate.clone(), app.clone());
     let mut tracked = state.apps.lock().unwrap();
@@ -809,6 +813,7 @@ fn hide_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Launcher::default())
         .setup(|app| {

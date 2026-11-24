@@ -12,14 +12,14 @@ export type CustomInput = Pick<CustomGame, "name" | "url"> & Partial<CustomGame>
 
 export const CUSTOM_ID = "custom";
 const LUD16 = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const isApp = (url: string) => url.startsWith("/") && /\.app\/?$/.test(url);
+const isApp = (url: string) => /^(\/|[a-z]:\\)/i.test(url);
 
 export function saveCustom(list: CustomGame[], input: CustomInput, now: number) {
   const name = input.name.trim();
   const url = input.url.trim();
   const lud16 = input.lud16?.trim();
   if (!name) return "Give it a name.";
-  if (!https(url) && !isApp(url)) return "Enter an https:// address or choose a .app.";
+  if (!https(url) && !isApp(url)) return "Enter an https:// address or choose an app.";
   if (lud16 && !LUD16.test(lud16)) return "A lightning address looks like name@domain.com.";
   const old = list.find((c) => c.id === input.id);
   const saved = {

@@ -45,7 +45,7 @@ export function CustomDialog({
     setOpen(o);
     setError("");
     setFields(entry ? { ...blank, ...entry } : blank);
-    setApp(!!entry?.url.startsWith("/"));
+    setApp(!!entry && !entry.url.startsWith("https://"));
   };
   const choose = async () => {
     const path = await pickApp();
@@ -55,9 +55,9 @@ export function CustomDialog({
         name:
           fields.name ||
           path
-            .split("/")
+            .split(/[\\/]/)
             .pop()!
-            .replace(/\.app$/, ""),
+            .replace(/\.\w+$/, ""),
       });
   };
   const save = () => {
@@ -73,7 +73,7 @@ export function CustomDialog({
         <DialogHeader>
           <DialogTitle>{entry ? `Edit ${entry.name}` : "Add a game"}</DialogTitle>
           <DialogDescription>
-            Only on this Mac: nothing about it is published except your presence while you play.
+            It stays on this computer; only your presence is published while you play.
           </DialogDescription>
         </DialogHeader>
         {!entry && (
@@ -81,7 +81,7 @@ export function CustomDialog({
             {(
               [
                 [false, GlobeIcon, "Web game"],
-                [true, AppWindowIcon, "Mac app"],
+                [true, AppWindowIcon, "App on this computer"],
               ] as const
             ).map(([isApp, Icon, label]) => (
               <button
