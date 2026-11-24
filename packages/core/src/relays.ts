@@ -2,11 +2,19 @@ import { SimplePool } from "nostr-tools/pool";
 import type { Filter } from "nostr-tools/filter";
 import type { Event } from "nostr-tools/pure";
 import { listsFor, type CuratorList, type ListRef } from "./curation";
+import { inboxRelays } from "./dm";
 import { AUTH_NS, DEPTH_NS, parseLabels, type Label } from "./labels";
 import { lastUpdated, parseListings, type Game } from "./listing";
 import { parseProfile, type Friend } from "./presence";
 import { profileFields } from "./profile";
-import { DEFAULT_RELAYS, relaysFor, writeUseOf, type ReadUse, type Relay } from "./relaySettings";
+import {
+  DEFAULT_RELAYS,
+  relaysFor,
+  writeUseOf,
+  type ReadUse,
+  type Relay,
+  type Use,
+} from "./relaySettings";
 import { payOverNwc, zapInvoice, type Payment, type WalletRequest } from "./zap";
 
 const pool = new SimplePool();
@@ -64,10 +72,14 @@ export async function fetchListings(coordinates: string[]): Promise<Game[]> {
   return parseListings(events, true).filter((g) => coordinates.includes(g.coordinate));
 }
 
+const newest = async (filter: Filter) =>
+  (await query("social", filter, 4000)).sort((a, b) => b.created_at - a.created_at)[0];
+
+export const fetchInboxRelays = async (pubkey: string) =>
+  inboxRelays(await newest({ kinds: [10050], authors: [pubkey] }));
+
 export async function fetchFriends(pubkey: string): Promise<Friend[]> {
-  const [contacts] = (await query("social", { kinds: [3], authors: [pubkey] }, 4000)).sort(
-    (a, b) => b.created_at - a.created_at,
-  );
+  const contacts = await newest({ kinds: [3], authors: [pubkey] });
   const follows = [
     ...new Set(contacts?.tags.filter((t) => t[0] === "p" && t[1]).map((t) => t[1]!)),
   ];
@@ -89,13 +101,16 @@ async function fetchProfiles(pubkeys: string[]): Promise<Friend[]> {
 export const fetchProfileEvent = async (pubkey: string) =>
   (await latestProfiles([pubkey])).get(pubkey);
 
-export const subscribe = (filter: Filter, onevent: (event: Event) => void) => {
-  const sub = pool.subscribeMany(relaysFor(settings, "social"), filter, { onevent });
+const or = (relays: string[] | undefined, use: Use) =>
+  relays?.length ? relays : relaysFor(settings, use);
+
+export const subscribe = (filter: Filter, onevent: (event: Event) => void, relays?: string[]) => {
+  const sub = pool.subscribeMany(or(relays, "social"), filter, { onevent });
   return () => sub.close();
 };
 
-export const publish = async (event: Event) =>
-  void (await Promise.any(pool.publish(relaysFor(settings, writeUseOf(event.kind)), event)));
+export const publish = async (event: Event, relays?: string[]) =>
+  void (await Promise.any(pool.publish(or(relays, writeUseOf(event.kind)), event)));
 
 export async function fetchLabels(curators: string[]): Promise<Label[]> {
   const events = await query(

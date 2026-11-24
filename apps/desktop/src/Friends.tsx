@@ -1,8 +1,9 @@
 import { findGame, playing } from "@keyhall/core/launcher";
 import { friendName, type Friend } from "@keyhall/core/presence";
 import { Popover, PopoverContent, PopoverTrigger } from "@keyhall/ui/components/popover";
-import { CaretRightIcon, CheckIcon, EyeIcon } from "@phosphor-icons/react";
+import { CaretRightIcon, ChatCircleIcon, CheckIcon, EyeIcon } from "@phosphor-icons/react";
 import { useState, type ReactNode } from "react";
+import { DmDialog } from "./DmDialog.tsx";
 import { Launcher } from "./launcher.ts";
 import { GameIcon } from "./Library.tsx";
 import { MODES } from "./PresenceSettings.tsx";
@@ -33,11 +34,24 @@ export function Avatar({
   );
 }
 
+function MessageButton({ friend, onClick }: { friend: Friend; onClick(): void }) {
+  return (
+    <button
+      aria-label={`Message ${friendName(friend)}`}
+      onClick={onClick}
+      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-white/[0.06] hover:text-foreground focus-visible:opacity-100"
+    >
+      <ChatCircleIcon className="size-4" />
+    </button>
+  );
+}
+
 export function FriendsColumn() {
   const context = Launcher.useSelector((s) => s.context);
   const { send } = Launcher.useActorRef();
   const { friends, presence } = context;
   const [open, setOpen] = useState(false);
+  const [chat, setChat] = useState<Friend>();
   const active = playing(context);
   const idle = (friends ?? []).filter((f) => !active.some((p) => p.friend === f));
   const heading = "flex h-7 items-center px-2 text-[12px] font-medium text-muted-foreground";
@@ -62,25 +76,27 @@ export function FriendsColumn() {
                 {active.map(({ friend, status }) => {
                   const game = status.coordinate && findGame(context, status.coordinate);
                   return (
-                    <button
-                      key={friend.pubkey}
-                      disabled={!game}
-                      onClick={() => game && send({ type: "select", game })}
-                      className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left enabled:hover:bg-white/[0.04]"
-                    >
-                      <Avatar friend={friend} className="size-8" />
-                      <span className="grid min-w-0 flex-1 gap-0.5 leading-snug">
-                        <span className="truncate text-[13px] font-medium">
-                          {friendName(friend)}
+                    <div key={friend.pubkey} className="group flex items-center pr-1">
+                      <button
+                        disabled={!game}
+                        onClick={() => game && send({ type: "select", game })}
+                        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-left enabled:hover:bg-white/[0.04]"
+                      >
+                        <Avatar friend={friend} className="size-8" />
+                        <span className="grid min-w-0 flex-1 gap-0.5 leading-snug">
+                          <span className="truncate text-[13px] font-medium">
+                            {friendName(friend)}
+                          </span>
+                          <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-ingame">
+                            {game && (
+                              <GameIcon game={game} className="size-4 rounded-[4px] text-[9px]" />
+                            )}
+                            <span className="truncate">{game ? game.name : status.content}</span>
+                          </span>
                         </span>
-                        <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-ingame">
-                          {game && (
-                            <GameIcon game={game} className="size-4 rounded-[4px] text-[9px]" />
-                          )}
-                          <span className="truncate">{game ? game.name : status.content}</span>
-                        </span>
-                      </span>
-                    </button>
+                      </button>
+                      <MessageButton friend={friend} onClick={() => setChat(friend)} />
+                    </div>
                   );
                 })}
               </section>
@@ -88,17 +104,19 @@ export function FriendsColumn() {
             <section>
               <h3 className={heading}>Follows</h3>
               {idle.map((friend) => (
-                <div key={friend.pubkey} className="flex h-9 items-center gap-3 px-2">
+                <div key={friend.pubkey} className="group flex h-9 items-center gap-3 pr-1 pl-2">
                   <Avatar friend={friend} className="size-6" />
-                  <span className="truncate text-[13px] text-foreground/80">
+                  <span className="flex-1 truncate text-[13px] text-foreground/80">
                     {friendName(friend)}
                   </span>
+                  <MessageButton friend={friend} onClick={() => setChat(friend)} />
                 </div>
               ))}
             </section>
           </>
         )}
       </div>
+      <DmDialog friend={chat} onClose={() => setChat(undefined)} />
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger className="flex shrink-0 items-center gap-2 border-t border-white/[0.06] px-5 py-3 text-left text-[12px] text-muted-foreground hover:text-foreground data-popup-open:text-foreground">
           <EyeIcon className="size-4" />
