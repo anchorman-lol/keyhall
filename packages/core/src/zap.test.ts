@@ -69,6 +69,13 @@ describe("zapInvoice", () => {
     expect(calls[1]!.searchParams.get("comment")).toBe("Keyhall budget");
   });
 
+  it("pays a custom game, which has no Nostr key, without a zap request", async () => {
+    const { fetch, calls } = lnurl({ commentAllowed: 100 });
+    await zapInvoice(fetch, { ...part, coordinate: "custom:a", pubkey: "" }, "Keyhall", []);
+    expect(calls[1]!.searchParams.get("nostr")).toBeNull();
+    expect(calls[1]!.searchParams.get("comment")).toBe("Keyhall");
+  });
+
   it("refuses an invoice for a different amount", async () => {
     const fetch = vi.fn(async (input: string) =>
       input.includes("lnurlp")

@@ -16,6 +16,7 @@ import {
   zap,
 } from "@keyhall/core/relays";
 import { loadRelays } from "@keyhall/core/relaySettings";
+import { loadCustom } from "@keyhall/core/custom";
 import { loadSources } from "@keyhall/core/sources";
 import { shimScript } from "@keyhall/core/shim";
 import { invoke } from "@tauri-apps/api/core";
@@ -52,6 +53,8 @@ export const dms = {
   subscribe,
 } satisfies DmDeps & { subscribe: typeof subscribe };
 
+export const pickApp = () => invoke<string | null>("pick_app");
+
 const relays = loadRelays(JSON.parse(localStorage.getItem("relays") ?? "null"));
 setRelays(relays);
 
@@ -68,12 +71,14 @@ const machine = launcherMachine(
     signLabel: (event) => invoke("sign_label", { event }),
     publish,
     openGame: (game, hotkey) =>
-      invoke("open_game", {
-        name: game.name,
-        coordinate: game.coordinate,
-        url: game.url,
-        shim: shimScript(hotkey),
-      }),
+      game.custom === "app"
+        ? invoke("launch_app", { name: game.name, coordinate: game.coordinate, path: game.url })
+        : invoke("open_game", {
+            name: game.name,
+            coordinate: game.coordinate,
+            url: game.url,
+            shim: shimScript(hotkey),
+          }),
     openPanel: (game, kind, id, props) => void invoke("open_panel", { game, kind, id, props }),
     saveHotkey: (hotkey) => localStorage.setItem("hotkey", JSON.stringify(hotkey)),
     checkGame: (label) => void invoke("check_game", { label }),
@@ -101,6 +106,7 @@ const machine = launcherMachine(
     },
     saveObserved: (observed) => localStorage.setItem("observed", JSON.stringify(observed)),
     saveSources: (sources) => localStorage.setItem("sources", JSON.stringify(sources)),
+    saveCustom: (custom) => localStorage.setItem("custom", JSON.stringify(custom)),
     saveRelays: (relays) => {
       setRelays(relays);
       localStorage.setItem("relays", JSON.stringify(relays));
@@ -130,6 +136,7 @@ const machine = launcherMachine(
   {
     observed: JSON.parse(localStorage.getItem("observed") ?? "{}"),
     sources: loadSources(JSON.parse(localStorage.getItem("sources") ?? "null")),
+    custom: loadCustom(JSON.parse(localStorage.getItem("custom") ?? "null")),
     relays,
     budget: JSON.parse(localStorage.getItem("budget") ?? "null") ?? undefined,
     friendsOpen: JSON.parse(localStorage.getItem("friendsOpen") ?? "null") ?? undefined,

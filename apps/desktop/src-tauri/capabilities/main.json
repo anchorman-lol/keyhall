@@ -15,6 +15,8 @@
     "allow-import-key",
     "allow-sign-out",
     "allow-open-game",
+    "allow-pick-app",
+    "allow-launch-app",
     "allow-check-game",
     "allow-close-game",
     "allow-open-panel",

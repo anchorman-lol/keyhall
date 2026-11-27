@@ -25,6 +25,7 @@ export interface Game {
   depth: Depth | undefined;
   repos: string[];
   payTo: Recipient[];
+  custom?: "web" | "app";
 }
 
 export interface Recipient {

@@ -1,3 +1,4 @@
+mod apps;
 mod dm;
 mod lnurl;
 mod meter;
@@ -19,6 +20,7 @@ use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::oneshot;
 use url::Url;
@@ -126,6 +128,7 @@ struct Launcher {
     keys: Mutex<Option<Keys>>,
     wallet: Mutex<Option<NostrWalletConnectUri>>,
     games: Mutex<HashMap<String, Game>>,
+    apps: Mutex<HashMap<String, apps::Tracked>>,
     approved: Mutex<HashSet<(String, u16)>>,
     /// Sign requests waiting on a notice, with the label of the game that asked.
     pending: Mutex<HashMap<u64, (String, oneshot::Sender<bool>)>>,
@@ -261,7 +264,11 @@ async fn sign_out(app: AppHandle) -> Result<(), String> {
     keychain_task(app, |l| {
         match keychain(KEYCHAIN_ACCOUNT)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(e) => return Err(format!("Keyhall can't remove the key from the keychain: {e}")),
+            Err(e) => {
+                return Err(format!(
+                    "Keyhall can't remove the key from the keychain: {e}"
+                ));
+            }
         }
         *l.keys.lock().unwrap() = None;
         l.approved.lock().unwrap().clear();
@@ -342,12 +349,7 @@ fn open_game(
         .initialization_script(&shim)
         .build()
         .map_err(|e| e.to_string())?;
-    meter
-        .lock()
-        .unwrap()
-        .start(&label, &coordinate, meter::now());
-    let closed = label.clone();
-    let coordinate_closed = coordinate.clone();
+    let (closed, coordinate_closed) = (label.clone(), coordinate.clone());
     window.on_window_event(move |event| match event {
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
             if let Some(game) = app.get_webview_window(&closed) {
@@ -360,21 +362,86 @@ fn open_game(
                     let _ = panel.destroy();
                 }
             }
-            app.state::<Mutex<Meter>>()
-                .lock()
-                .unwrap()
-                .stop(&closed, meter::now());
-            app.state::<Launcher>().games.lock().unwrap().remove(&closed);
-            let _ = app.emit_to("main", "closed", json!({"coordinate": coordinate_closed}));
+            game_closed(&app, &closed, &coordinate_closed);
         }
         _ => {}
     });
+    game_started(&state, &meter, &label, name, coordinate);
+    Ok(label)
+}
+
+fn game_started(
+    state: &Launcher,
+    meter: &Mutex<Meter>,
+    label: &str,
+    name: String,
+    coordinate: String,
+) {
+    meter
+        .lock()
+        .unwrap()
+        .start(label, &coordinate, meter::now());
     state
         .games
         .lock()
         .unwrap()
-        .insert(label.clone(), Game { name, coordinate });
-    Ok(label)
+        .insert(label.into(), Game { name, coordinate });
+}
+
+fn game_closed(app: &AppHandle, label: &str, coordinate: &str) {
+    app.state::<Mutex<Meter>>()
+        .lock()
+        .unwrap()
+        .stop(label, meter::now());
+    let launcher = app.state::<Launcher>();
+    launcher.games.lock().unwrap().remove(label);
+    launcher.apps.lock().unwrap().remove(label);
+    let _ = app.emit_to("main", "closed", json!({"coordinate": coordinate}));
+}
+
+#[tauri::command]
+async fn pick_app(app: AppHandle) -> Option<String> {
+    let mut dialog = app.dialog().file().set_title("Choose a game or app");
+    if !apps::PICK.is_empty() {
+        dialog = dialog.add_filter("Apps", apps::PICK);
+    }
+    let (tx, rx) = oneshot::channel();
+    dialog.pick_file(|path| {
+        let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+    });
+    Some(rx.await.ok()??.to_string_lossy().into())
+}
+
+#[tauri::command]
+fn launch_app(
+    app: AppHandle,
+    state: State<Launcher>,
+    meter: State<Mutex<Meter>>,
+    name: String,
+    coordinate: String,
+    path: String,
+) -> Result<String, String> {
+    let label = game_label(&path);
+    if state.apps.lock().unwrap().contains_key(&label) {
+        return Ok(label);
+    }
+    let command = apps::launch(&path)?;
+    game_started(&state, &meter, &label, name, coordinate.clone());
+    let (closed, coordinate_closed, handle) = (label.clone(), coordinate.clone(), app.clone());
+    let mut tracked = state.apps.lock().unwrap();
+    match apps::track(command, move || {
+        game_closed(&handle, &closed, &coordinate_closed)
+    }) {
+        Ok(process) => {
+            tracked.insert(label.clone(), process);
+            Ok(label)
+        }
+        Err(e) => {
+            drop(tracked);
+            game_closed(&app, &label, &coordinate);
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
@@ -391,6 +458,10 @@ fn check_game(app: AppHandle, label: String) -> Result<(), String> {
 fn close_game(app: AppHandle, state: State<Launcher>, label: String) -> Result<(), String> {
     if !state.games.lock().unwrap().contains_key(&label) {
         return Err("Not a game window".into());
+    }
+    if let Some(process) = state.apps.lock().unwrap().get(&label) {
+        process.stop();
+        return Ok(());
     }
     match app.get_webview_window(&label) {
         Some(window) => window.close().map_err(|e| e.to_string()),
@@ -742,6 +813,7 @@ fn hide_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Launcher::default())
         .setup(|app| {
@@ -774,6 +846,8 @@ pub fn run() {
             import_key,
             sign_out,
             open_game,
+            pick_app,
+            launch_app,
             check_game,
             close_game,
             answer_notice,

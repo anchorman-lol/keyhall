@@ -3,6 +3,14 @@ import { verifyEvent, type Event } from "nostr-tools/pure";
 import { assign, enqueueActions, fromCallback, fromPromise, setup } from "xstate";
 import { KEYHALL, monthKey, monthName, playTime, split, type Session } from "./budget";
 import { parseListRef, PICKS, PICKS_PUBKEY, type CuratorList, type ListRef } from "./curation";
+import {
+  CUSTOM_ID,
+  customGame,
+  removeCustom,
+  saveCustom,
+  type CustomGame,
+  type CustomInput,
+} from "./custom";
 import type { Depth, Observation } from "./depth";
 import {
   depthVerdict,
@@ -77,6 +85,7 @@ export interface LauncherDeps extends PresenceDeps {
   fetchListings(coordinates: string[]): Promise<Game[]>;
   fetchGames(): Promise<Game[]>;
   saveSources(sources: SourceSettings): void;
+  saveCustom(custom: CustomGame[]): void;
   saveRelays(relays: Relay[]): void;
   probeRelay(url: string): Promise<boolean>;
   fetchLastUpdated(game: Game): Promise<number>;
@@ -113,6 +122,7 @@ export interface Stored {
   presence: PresenceSettings;
   circle: Circle;
   sources: SourceSettings;
+  custom: CustomGame[];
   relays: Relay[];
   budget: Partial<BudgetSettings>;
   friendsOpen: boolean;
@@ -127,6 +137,8 @@ export interface Fetched {
 export interface LauncherContext {
   sources: SourceSettings;
   sourceError: string;
+  custom: CustomGame[];
+  customError: string;
   failed: string[];
   relays: Relay[];
   relayError: string;
@@ -178,6 +190,8 @@ type Events =
   | { type: "source.toggle"; id: string }
   | { type: "source.add"; input: string }
   | { type: "source.remove"; id: string }
+  | { type: "custom.save"; input: CustomInput }
+  | { type: "custom.remove"; id: string }
   | { type: "source.loaded"; id: string; lists: CuratorList[]; games: Game[]; failed?: boolean }
   | { type: "relay.add"; input: string }
   | { type: "relay.remove"; url: string }
@@ -214,8 +228,10 @@ const record = (
   [coordinate]: update(context.observed[coordinate] ?? { kinds: [], signer: false }),
 });
 
+const customGames = (context: LauncherContext) => context.custom.map(customGame);
+
 export const findGame = (context: LauncherContext, coordinate: string) =>
-  context.listings[coordinate];
+  context.listings[coordinate] ?? customGames(context).find((g) => g.coordinate === coordinate);
 
 const sourceGames = (context: LauncherContext, id: string) =>
   (context.fetched[id]?.games ?? []).flatMap((c) => context.listings[c] ?? []);
@@ -226,6 +242,7 @@ export const sourceCount = (context: LauncherContext, id: string) =>
 export function sourceLabel(context: LauncherContext, id: string) {
   if (id === PICKS_ID) return PICKS;
   if (id === UNVETTED_ID) return "Unvetted listings";
+  if (id === CUSTOM_ID) return "Added by you";
   const titles = context.fetched[id]?.lists.map((l) => l.title).join(" · ");
   const ref = sourceList(context.sources).find((s) => s.id === id)?.ref;
   const npub = ref ? npubEncode(ref.pubkey) : id;
@@ -237,10 +254,10 @@ export const unreachable = (context: LauncherContext) =>
 
 export const library = (context: LauncherContext) => {
   const sources = sourceList(context.sources);
-  return union(
-    sources,
-    Object.fromEntries(sources.map(({ id }) => [id, sourceGames(context, id)])),
-  );
+  return union([{ id: CUSTOM_ID, enabled: true }, ...sources], {
+    ...Object.fromEntries(sources.map(({ id }) => [id, sourceGames(context, id)])),
+    [CUSTOM_ID]: customGames(context),
+  });
 };
 
 async function fetchSource({ ref }: Source, deps: LauncherDeps) {
@@ -328,7 +345,7 @@ export const exampleToast: Toast = {
 };
 
 export function monthSplit(context: LauncherContext, month: string) {
-  const games = Object.values(context.listings);
+  const games = [...Object.values(context.listings), ...customGames(context)];
   const paid = context.budget.paid[month] ?? {};
   const share = paid[KEYHALL.key] === 0 ? 0 : context.budget.share;
   const { shares, reserve, keyhall } = split(
@@ -500,6 +517,8 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
     context: {
       sources: stored.sources ?? defaultSources,
       sourceError: "",
+      custom: stored.custom ?? [],
+      customError: "",
       failed: [],
       relays: stored.relays ?? DEFAULT_RELAYS,
       relayError: "",
@@ -566,6 +585,23 @@ export const launcherMachine = (deps: LauncherDeps, stored: Partial<Stored>) =>
         actions: [
           assign({ sources: ({ context, event }) => removeCurator(context.sources, event.id) }),
           "saveSources",
+        ],
+      },
+      "custom.save": {
+        actions: enqueueActions(({ context, event, enqueue }) => {
+          const custom = saveCustom(context.custom, event.input, Math.floor(Date.now() / 1000));
+          if (typeof custom === "string") return enqueue.assign({ customError: custom });
+          const current =
+            context.current && findGame({ ...context, custom }, context.current.coordinate);
+          enqueue.assign({ custom, customError: "", current });
+          enqueue(() => deps.saveCustom(custom));
+        }),
+      },
+      "custom.remove": {
+        guard: ({ context, event }) => !context.windows[`${CUSTOM_ID}:${event.id}`],
+        actions: [
+          assign({ custom: ({ context, event }) => removeCustom(context.custom, event.id) }),
+          ({ context }) => deps.saveCustom(context.custom),
         ],
       },
       "relay.add": [

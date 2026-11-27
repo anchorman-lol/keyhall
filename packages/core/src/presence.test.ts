@@ -68,6 +68,23 @@ describe("public status", () => {
     });
   });
 
+  it("names a custom game without its local id: a web game links its URL, an app nothing", () => {
+    const web = { coordinate: "custom:a", name: "Chess", url: "https://chess.example" } as Game;
+    const app = { ...web, url: "/Applications/Chess.app", custom: "app" } as Game;
+    expect(publicStatus({ ...web, custom: "web" }, now).tags).toEqual([
+      ["d", "game"],
+      ["r", web.url],
+      ["expiration", String(now + STATUS_TTL)],
+    ]);
+    expect(publicStatus(app, now)).toMatchObject({
+      content: "Playing Chess",
+      tags: [
+        ["d", "game"],
+        ["expiration", String(now + STATUS_TTL)],
+      ],
+    });
+  });
+
   it("clears with an empty status", () => {
     expect(publicStatus(undefined, now)).toEqual({
       kind: 30315,
